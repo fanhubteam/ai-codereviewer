@@ -18,9 +18,8 @@ const AVALIAR_TEST_PR: boolean = core.getInput("AVALIAR_TEST_PR").toLowerCase() 
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
-});
+// Modificar a inicialização do OpenAI para ser condicional
+const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 const TEST_PATTERNS = [
   // Padrões genéricos de teste
@@ -257,13 +256,16 @@ async function getAIResponse(prompt: string): Promise<Array<{
 }> | null> {
   let provider: AIProvider;
 
-  // Se não tiver OPENAI_API_KEY, usar Gemini como padrão
-  if (!OPENAI_API_KEY || AI_PROVIDER === 'gemini') {
+  // Se AI_PROVIDER for gemini ou não tiver OPENAI_API_KEY, usar Gemini
+  if (AI_PROVIDER === 'gemini' || !OPENAI_API_KEY) {
     if (!GOOGLE_API_KEY) {
       throw new Error('GOOGLE_API_KEY is required when using Gemini or when OPENAI_API_KEY is not provided');
     }
     provider = new GeminiProvider(GOOGLE_API_KEY);
   } else {
+    if (!OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
+    }
     provider = new OpenAIProvider(OPENAI_API_KEY);
   }
 
