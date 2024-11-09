@@ -14,6 +14,7 @@ const GOOGLE_API_KEY: string = core.getInput("GOOGLE_API_KEY");
 const GEMINI_MODEL: string = core.getInput("GEMINI_MODEL");
 const BOT_NAME: string = core.getInput("BOT_NAME");
 const BOT_IMAGE_URL: string = core.getInput("BOT_IMAGE_URL");
+const AVALIAR_TEST_PR: boolean = core.getInput("AVALIAR_TEST_PR").toLowerCase() === "true";
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -434,21 +435,25 @@ async function main() {
     const parsedDiff = parseDiff(diff);
     const testAnalysis = await analyzeTests(parsedDiff, prDetails);
 
+    // Verifica se existem arquivos que precisam de teste
     if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
-      const testWarning = `<img src="${BOT_IMAGE_URL}" width="20" height="20" /> **${BOT_NAME} - Teste Unitário Requerido**
+      const testWarning = `<img src="${BOT_IMAGE_URL}" width="20" height="20" /> **${BOT_NAME} - Verificação de Testes**
 
-⚠️ Esta PR contém alterações em arquivos que requerem testes unitários, mas nenhum teste foi encontrado.
+⚠️ Esta PR contém alterações em arquivos que requerem testes, mas nenhum teste foi encontrado.
 
 Arquivos que precisam de testes:
 ${testAnalysis.missingTests.map(file => `- \`${file}\``).join('\n')}
 
-Por favor, adicione testes unitários apropriados ou inclua uma justificativa no corpo da PR caso os testes não sejam necessários.
+Por favor:
+1. Adicione testes apropriados para as alterações realizadas, ou
+2. Inclua uma justificativa no corpo da PR caso os testes não sejam necessários.
+
 Use uma das seguintes palavras-chave na descrição da PR para indicar que não são necessários testes:
-- "no tests needed"
-- "test exempt"
-- "skip tests"
 - "sem necessidade de teste"
-- "não requer teste"`;
+- "não requer teste"
+- "skip tests"
+- "test exempt"
+- "no tests needed"`;
 
       await octokit.issues.createComment({
         owner: prDetails.owner,
@@ -456,17 +461,24 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
         issue_number: prDetails.pull_number,
         body: testWarning
       });
+      
+      // Se AVALIAR_TEST_PR for true, encerra aqui
+      if (AVALIAR_TEST_PR) {
+        return;
+      }
     }
 
-    // Continue com a análise normal do código se necessário
-    const excludePatterns = core.getInput("exclude").split(",").map(s => s.trim());
-    const filteredDiff = parsedDiff.filter(file => 
-      !excludePatterns.some(pattern => minimatch(file.to ?? "", pattern))
-    );
+    // Continua com a análise normal do código apenas se AVALIAR_TEST_PR for false
+    if (!AVALIAR_TEST_PR) {
+      const excludePatterns = core.getInput("exclude").split(",").map(s => s.trim());
+      const filteredDiff = parsedDiff.filter(file => 
+        !excludePatterns.some(pattern => minimatch(file.to ?? "", pattern))
+      );
 
-    const comments = await analyzeCode(filteredDiff, prDetails);
-    if (comments.length > 0) {
-      await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+      const comments = await analyzeCode(filteredDiff, prDetails);
+      if (comments.length > 0) {
+        await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+      }
     }
   }
 }

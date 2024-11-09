@@ -34,6 +34,10 @@ inputs:
     description: "URL of the bot's avatar image"
     required: false
     default: "https://avatars.githubusercontent.com/u/1324305?v=4"
+  AVALIAR_TEST_PR:
+    description: "Flag para verificar apenas a existência de testes na PR"
+    required: false
+    default: "false"
 runs:
   using: "node16"
   main: "dist/index.js"
