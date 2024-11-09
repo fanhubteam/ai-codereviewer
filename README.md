@@ -29,6 +29,7 @@ on:
     types:
       - opened
       - synchronize
+      - reopened
 permissions: write-all
 jobs:
   review:
@@ -40,10 +41,13 @@ jobs:
       - name: AI Code Reviewer
         uses: your-username/ai-code-reviewer@main
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # The GITHUB_TOKEN is there by default so you just need to keep it like it is and not necessarily need to add it as secret as it will throw an error. [More Details](https://docs.github.com/en/actions/security-guides/automatic-token-authentication#about-the-github_token-secret)
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4" # Optional: defaults to "gpt-4"
-          exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_PROVIDER: "gemini"
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GEMINI_MODEL: "gemini-1.5-pro" # Using Gemini 1.5 Pro
+          exclude: "**/*.json, **/*.md"
+          BOT_NAME: "QuatroDois"
+          BOT_IMAGE_URL: "your-image-url"
 ```
 
 4. Replace `your-username` with your GitHub username or organization name where the AI Code Reviewer repository is
@@ -52,6 +56,8 @@ jobs:
 5. Customize the `exclude` input if you want to ignore certain file patterns from being reviewed.
 
 6. Commit the changes to your repository, and AI Code Reviewer will start working on your future pull requests.
+
+### Using OpenAI (Default)
 
 ## How It Works
 
