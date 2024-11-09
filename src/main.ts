@@ -9,7 +9,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
-const AI_PROVIDER: string = core.getInput("AI_PROVIDER");
+const AI_PROVIDER: string = core.getInput("AI_PROVIDER").toLowerCase();
 const GOOGLE_API_KEY: string = core.getInput("GOOGLE_API_KEY");
 const GEMINI_MODEL: string = core.getInput("GEMINI_MODEL");
 const BOT_NAME: string = core.getInput("BOT_NAME");
@@ -249,27 +249,22 @@ class GeminiProvider implements AIProvider {
   }
 }
 
-// Modificar a função getAIResponse
+// Simplificar a função getAIResponse
 async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
-  let provider: AIProvider;
-
-  // Se AI_PROVIDER for gemini ou não tiver OPENAI_API_KEY, usar Gemini
-  if (AI_PROVIDER === 'gemini' || !OPENAI_API_KEY) {
+  if (AI_PROVIDER === 'gemini') {
     if (!GOOGLE_API_KEY) {
-      throw new Error('GOOGLE_API_KEY is required when using Gemini or when OPENAI_API_KEY is not provided');
+      throw new Error('GOOGLE_API_KEY is required when using Gemini provider');
     }
-    provider = new GeminiProvider(GOOGLE_API_KEY);
-  } else {
-    if (!OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
-    }
-    provider = new OpenAIProvider(OPENAI_API_KEY);
+    return new GeminiProvider(GOOGLE_API_KEY).getResponse(prompt);
   }
-
-  return provider.getResponse(prompt);
+  
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
+  }
+  return new OpenAIProvider(OPENAI_API_KEY).getResponse(prompt);
 }
 
 function createComment(

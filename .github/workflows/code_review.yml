@@ -16,7 +16,7 @@ jobs:
         uses: freeedcom/ai-codereviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_PROVIDER: "gemini"  # Definir Gemini como provedor
+          AI_PROVIDER: "gemini"  # Definir explicitamente o provider
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GEMINI_MODEL: "gemini-pro"
           exclude: "yarn.lock,dist/**"
