@@ -4,6 +4,7 @@ on:
     types:
       - opened
       - synchronize
+      - reopened
 permissions: write-all
 jobs:
   code_review:
