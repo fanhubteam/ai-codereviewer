@@ -29,7 +29,7 @@ inputs:
   BOT_NAME:
     description: "Name of the bot that will appear in comments"
     required: false
-    default: "quatrodois"
+    default: "Quatrodois"
   BOT_IMAGE_URL:
     description: "URL of the bot's avatar image"
     required: false
