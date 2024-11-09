@@ -250,15 +250,17 @@ class GeminiProvider implements AIProvider {
   }
 }
 
+// Modificar a função getAIResponse
 async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
   let provider: AIProvider;
 
-  if (AI_PROVIDER === 'gemini') {
+  // Se não tiver OPENAI_API_KEY, usar Gemini como padrão
+  if (!OPENAI_API_KEY || AI_PROVIDER === 'gemini') {
     if (!GOOGLE_API_KEY) {
-      throw new Error('GOOGLE_API_KEY is required when using Gemini');
+      throw new Error('GOOGLE_API_KEY is required when using Gemini or when OPENAI_API_KEY is not provided');
     }
     provider = new GeminiProvider(GOOGLE_API_KEY);
   } else {
