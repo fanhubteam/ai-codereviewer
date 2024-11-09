@@ -19,3 +19,5 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4-1106-preview"
           exclude: "yarn.lock,dist/**"
+          BOT_NAME: "quatrodois"
+          BOT_IMAGE_URL: "https://avatars.githubusercontent.com/u/123456789?v=4"  # Substitua pela URL da sua imagem

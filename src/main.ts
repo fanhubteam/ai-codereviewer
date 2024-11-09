@@ -12,6 +12,8 @@ const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
 const AI_PROVIDER: string = core.getInput("AI_PROVIDER");
 const GOOGLE_API_KEY: string = core.getInput("GOOGLE_API_KEY");
 const GEMINI_MODEL: string = core.getInput("GEMINI_MODEL");
+const BOT_NAME: string = core.getInput("BOT_NAME");
+const BOT_IMAGE_URL: string = core.getInput("BOT_IMAGE_URL");
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -245,8 +247,10 @@ function createComment(
     if (!file.to) {
       return [];
     }
+    
+    const header = `<img src="${BOT_IMAGE_URL}" width="20" height="20" /> **${BOT_NAME}**\n\n`;
     return {
-      body: aiResponse.reviewComment,
+      body: header + aiResponse.reviewComment,
       path: file.to,
       line: Number(aiResponse.lineNumber),
     };

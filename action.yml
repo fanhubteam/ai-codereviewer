@@ -26,6 +26,14 @@ inputs:
     description: "Gemini model to use"
     required: false
     default: "gemini-pro"
+  BOT_NAME:
+    description: "Name of the bot that will appear in comments"
+    required: false
+    default: "quatrodois"
+  BOT_IMAGE_URL:
+    description: "URL of the bot's avatar image"
+    required: false
+    default: "https://avatars.githubusercontent.com/u/1324305?v=4"
 runs:
   using: "node16"
   main: "dist/index.js"
