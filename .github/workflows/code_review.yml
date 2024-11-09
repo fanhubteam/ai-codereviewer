@@ -1,6 +1,6 @@
-name: Code Review with OpenAI
+name: Code Review with LLM
 on:
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - synchronize
