@@ -420,6 +420,21 @@ function hasTestExemption(description: string): boolean {
 async function main() {
   try {
     console.log('\n=== Starting main execution ===');
+    console.log('Event path:', process.env.GITHUB_EVENT_PATH);
+    
+    const eventData = JSON.parse(
+      readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
+    );
+    
+    // Add debug log for event type
+    console.log('Event type:', eventData.action);
+    
+    // Check if it's a pull request event
+    if (!eventData.pull_request) {
+      console.error('Not a pull request event');
+      return;
+    }
+
     const prDetails = await getPRDetails();
     console.log('PR Details retrieved:', {
       owner: prDetails.owner,

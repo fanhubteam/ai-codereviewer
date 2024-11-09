@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Code Review
-        uses: freeedcom/ai-codereviewer@main
+        uses: fanhubteam/ai-codereviewer@main  # Ensure this matches the correct repository
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_PROVIDER: "gemini"
