@@ -1,6 +1,6 @@
 name: Code Review with LLM
 on:
-  pull_request_target:
+  pull_request:  # Change from pull_request_target to pull_request
     types:
       - opened
       - synchronize
@@ -15,8 +15,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+        
       - name: Code Review
         uses: fanhubteam/ai-codereviewer@main  # Ensure this matches the correct repository
         with:
