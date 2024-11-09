@@ -21,12 +21,43 @@ const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
 
+const TEST_PATTERNS = [
+  // Padrões genéricos de teste
+  "**/test/**",
+  "**/tests/**",
+  "**/*test*",
+  "**/*Test*",
+  "**/*spec*",
+  "**/*Spec*",
+  // Python/Django
+  "**/test_*.py",
+  "**/*_test.py",
+  "**/tests.py",
+  "**/conftest.py",
+  // JavaScript/TypeScript
+  "**/*.test.ts",
+  "**/*.test.js",
+  "**/*.spec.ts",
+  "**/*.spec.js",
+  // Outros padrões comuns
+  "**/__tests__/**",
+  "**/testing/**",
+  "**/pytest/**",
+  "**/unittest/**"
+];
+
 interface PRDetails {
   owner: string;
   repo: string;
   pull_number: number;
   title: string;
   description: string;
+}
+
+interface TestAnalysisResult {
+  hasTests: boolean;
+  missingTests: string[];
+  affectedFiles: string[];
 }
 
 async function getPRDetails(): Promise<PRDetails> {
@@ -272,6 +303,107 @@ async function createReviewComment(
   });
 }
 
+function needsTests(file: File): boolean {
+  const filename = file.to || '';
+  
+  // Ignora arquivos excluídos e arquivos que são testes
+  if (TEST_PATTERNS.some(pattern => minimatch(filename, pattern))) {
+    return false;
+  }
+
+  // Lista de extensões de arquivos que geralmente precisam de testes
+  const testableExtensions = [
+    '.py',    // Python
+    '.js',    // JavaScript
+    '.ts',    // TypeScript
+    '.jsx',   // React
+    '.tsx',   // React com TypeScript
+    '.vue',   // Vue
+    '.rb',    // Ruby
+    '.php',   // PHP
+    '.java',  // Java
+    '.go',    // Go
+    '.cs',    // C#
+    '.cpp',   // C++
+    '.rs'     // Rust
+  ];
+
+  // Ignora arquivos de configuração e tipos
+  const excludePatterns = [
+    '.config.',
+    '.conf.',
+    '.d.ts',
+    'settings.py',
+    'urls.py',
+    'wsgi.py',
+    'asgi.py',
+    'manage.py'
+  ];
+
+  const ext = filename.slice(filename.lastIndexOf('.'));
+  return testableExtensions.includes(ext) && 
+         !excludePatterns.some(pattern => filename.includes(pattern));
+}
+
+async function analyzeTests(parsedDiff: File[], prDetails: PRDetails): Promise<TestAnalysisResult> {
+  const affectedFiles = parsedDiff
+    .filter(file => file.to && needsTests(file))
+    .map(file => file.to!) || [];
+
+  const testFiles = parsedDiff
+    .filter(file => file.to && (
+      // Verifica se o arquivo está em um diretório de testes
+      TEST_PATTERNS.some(pattern => minimatch(file.to!, pattern)) ||
+      // Verifica se o arquivo contém 'test' no nome (case insensitive)
+      file.to.toLowerCase().includes('test')
+    ))
+    .map(file => file.to!);
+
+  const missingTests = affectedFiles.filter(file => {
+    const baseNameWithoutExt = file.replace(/\.[^/.]+$/, '');
+    const possibleTestPatterns = [
+      // Padrões genéricos
+      `${baseNameWithoutExt}_test`,
+      `test_${baseNameWithoutExt}`,
+      `${baseNameWithoutExt}.test`,
+      `${baseNameWithoutExt}.spec`,
+      // Considera diferentes diretórios de teste
+      baseNameWithoutExt.replace(/src\//, 'test/'),
+      baseNameWithoutExt.replace(/src\//, 'tests/'),
+      baseNameWithoutExt.replace(/app\//, 'tests/'),
+      // Django specific
+      baseNameWithoutExt.replace(/views\.py$/, 'tests.py'),
+      baseNameWithoutExt.replace(/models\.py$/, 'tests.py')
+    ];
+
+    return !testFiles.some(testFile => 
+      possibleTestPatterns.some(pattern => 
+        testFile.toLowerCase().includes(pattern.toLowerCase())
+      )
+    );
+  });
+
+  return {
+    hasTests: testFiles.length > 0,
+    missingTests,
+    affectedFiles
+  };
+}
+
+function hasTestExemption(description: string): boolean {
+  const exemptionKeywords = [
+    'no tests needed',
+    'test exempt',
+    'skip tests',
+    'sem necessidade de teste',
+    'não requer teste'
+  ];
+  
+  return exemptionKeywords.some(keyword => 
+    description.toLowerCase().includes(keyword.toLowerCase())
+  );
+}
+
 async function main() {
   const prDetails = await getPRDetails();
   let diff: string | null;
@@ -279,58 +411,62 @@ async function main() {
     readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
   );
 
-  if (eventData.action === "opened" || eventData.action === "reopened") {
-    diff = await getDiff(
-      prDetails.owner,
-      prDetails.repo,
-      prDetails.pull_number
+  if (eventData.action === "opened" || eventData.action === "reopened" || eventData.action === "synchronize") {
+    if (eventData.action === "synchronize") {
+      const response = await octokit.repos.compareCommits({
+        headers: { accept: "application/vnd.github.v3.diff" },
+        owner: prDetails.owner,
+        repo: prDetails.repo,
+        base: eventData.before,
+        head: eventData.after,
+      });
+      diff = String(response.data);
+    } else {
+      diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+    }
+
+    if (!diff) {
+      console.log("No diff found");
+      return;
+    }
+
+    const parsedDiff = parseDiff(diff);
+    const testAnalysis = await analyzeTests(parsedDiff, prDetails);
+
+    if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
+      const testWarning = `<img src="${BOT_IMAGE_URL}" width="20" height="20" /> **${BOT_NAME} - Teste Unitário Requerido**
+
+⚠️ Esta PR contém alterações em arquivos que requerem testes unitários, mas nenhum teste foi encontrado.
+
+Arquivos que precisam de testes:
+${testAnalysis.missingTests.map(file => `- \`${file}\``).join('\n')}
+
+Por favor, adicione testes unitários apropriados ou inclua uma justificativa no corpo da PR caso os testes não sejam necessários.
+Use uma das seguintes palavras-chave na descrição da PR para indicar que não são necessários testes:
+- "no tests needed"
+- "test exempt"
+- "skip tests"
+- "sem necessidade de teste"
+- "não requer teste"`;
+
+      await octokit.issues.createComment({
+        owner: prDetails.owner,
+        repo: prDetails.repo,
+        issue_number: prDetails.pull_number,
+        body: testWarning
+      });
+    }
+
+    // Continue com a análise normal do código se necessário
+    const excludePatterns = core.getInput("exclude").split(",").map(s => s.trim());
+    const filteredDiff = parsedDiff.filter(file => 
+      !excludePatterns.some(pattern => minimatch(file.to ?? "", pattern))
     );
-  } else if (eventData.action === "synchronize") {
-    const newBaseSha = eventData.before;
-    const newHeadSha = eventData.after;
 
-    const response = await octokit.repos.compareCommits({
-      headers: {
-        accept: "application/vnd.github.v3.diff",
-      },
-      owner: prDetails.owner,
-      repo: prDetails.repo,
-      base: newBaseSha,
-      head: newHeadSha,
-    });
-
-    diff = String(response.data);
-  } else {
-    console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
-    return;
-  }
-
-  if (!diff) {
-    console.log("No diff found");
-    return;
-  }
-
-  const parsedDiff = parseDiff(diff);
-
-  const excludePatterns = core
-    .getInput("exclude")
-    .split(",")
-    .map((s) => s.trim());
-
-  const filteredDiff = parsedDiff.filter((file) => {
-    return !excludePatterns.some((pattern) =>
-      minimatch(file.to ?? "", pattern)
-    );
-  });
-
-  const comments = await analyzeCode(filteredDiff, prDetails);
-  if (comments.length > 0) {
-    await createReviewComment(
-      prDetails.owner,
-      prDetails.repo,
-      prDetails.pull_number,
-      comments
-    );
+    const comments = await analyzeCode(filteredDiff, prDetails);
+    if (comments.length > 0) {
+      await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+    }
   }
 }
 
