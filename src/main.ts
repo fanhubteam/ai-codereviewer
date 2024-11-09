@@ -165,8 +165,46 @@ class GeminiProvider implements AIProvider {
 
   async getResponse(prompt: string) {
     try {
-      const model = this.genAI.getGenerativeModel({ model: GEMINI_MODEL });
-      const result = await model.generateContent(prompt);
+      const model = this.genAI.getGenerativeModel({ 
+        model: GEMINI_MODEL,
+        generationConfig: {
+          temperature: 0.2,
+          topP: 1,
+          topK: 1,
+          // Força o modelo a gerar apenas JSON
+          structuredOutput: true,
+          // Define o schema esperado
+          schema: {
+            type: "object",
+            properties: {
+              reviews: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    lineNumber: { type: "string" },
+                    reviewComment: { type: "string" }
+                  },
+                  required: ["lineNumber", "reviewComment"]
+                }
+              }
+            },
+            required: ["reviews"]
+          }
+        }
+      });
+
+      // Adiciona instruções específicas para forçar JSON
+      const promptWithJson = `${prompt}\nIMPORTANT: You must respond only with valid JSON matching this exact schema:\n{
+        "reviews": [
+          {
+            "lineNumber": "string",
+            "reviewComment": "string"
+          }
+        ]
+      }`;
+
+      const result = await model.generateContent(promptWithJson);
       const response = result.response;
       const text = response.text();
       return JSON.parse(text).reviews;
