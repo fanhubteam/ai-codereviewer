@@ -7,19 +7,15 @@ import minimatch from "minimatch";
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
-const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
-const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
 const AI_PROVIDER: string = core.getInput("AI_PROVIDER").toLowerCase();
-const GOOGLE_API_KEY: string = core.getInput("GOOGLE_API_KEY");
-const GEMINI_MODEL: string = core.getInput("GEMINI_MODEL");
-const BOT_NAME: string = core.getInput("BOT_NAME");
-const BOT_IMAGE_URL: string = core.getInput("BOT_IMAGE_URL");
+const API_KEY: string = core.getInput("API_KEY");
+const MODEL: string = core.getInput("MODEL");
 const AVALIAR_TEST_PR: boolean = core.getInput("AVALIAR_TEST_PR").toLowerCase() === "true";
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
 // Modificar a inicialização do OpenAI para ser condicional
-const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+const openai = API_KEY ? new OpenAI({ apiKey: API_KEY }) : null;
 
 const TEST_PATTERNS = [
   // Padrões genéricos de teste
@@ -59,6 +55,13 @@ interface TestAnalysisResult {
   missingTests: string[];
   affectedFiles: string[];
 }
+
+// Adicionar logs iniciais de configuração
+console.log('=== Configuration Debug ===');
+console.log('AI_PROVIDER:', AI_PROVIDER);
+console.log('Has API_KEY:', !!API_KEY);
+console.log('AVALIAR_TEST_PR:', AVALIAR_TEST_PR);
+console.log('========================');
 
 async function getPRDetails(): Promise<PRDetails> {
   const { repository, number } = JSON.parse(
@@ -164,7 +167,7 @@ class OpenAIProvider implements AIProvider {
 
   async getResponse(prompt: string) {
     const queryConfig = {
-      model: OPENAI_API_MODEL,
+      model: MODEL,
       temperature: 0.2,
       max_tokens: 700,
       top_p: 1,
@@ -175,7 +178,7 @@ class OpenAIProvider implements AIProvider {
     try {
       const response = await this.openai.chat.completions.create({
         ...queryConfig,
-        ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
+        ...(MODEL === "gpt-4-1106-preview"
           ? { response_format: { type: "json_object" } }
           : {}),
         messages: [{ role: "system", content: prompt }],
@@ -200,7 +203,7 @@ class GeminiProvider implements AIProvider {
   async getResponse(prompt: string) {
     try {
       const model = this.genAI.getGenerativeModel({ 
-        model: GEMINI_MODEL,
+        model: MODEL,
         generationConfig: {
           temperature: 0.2,
           topP: 1,
@@ -249,22 +252,32 @@ class GeminiProvider implements AIProvider {
   }
 }
 
-// Simplificar a função getAIResponse
+// Modificar a função getAIResponse com mais logs
 async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
-  if (AI_PROVIDER === 'gemini') {
-    if (!GOOGLE_API_KEY) {
-      throw new Error('GOOGLE_API_KEY is required when using Gemini provider');
-    }
-    return new GeminiProvider(GOOGLE_API_KEY).getResponse(prompt);
-  }
+  console.log('\n=== getAIResponse Debug ===');
+  console.log('Selecting AI provider:', AI_PROVIDER);
   
-  if (!OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is required when using OpenAI provider');
+  try {
+    if (!API_KEY) {
+      throw new Error('API_KEY is required');
+    }
+
+    if (AI_PROVIDER === 'gemini') {
+      const provider = new GeminiProvider(API_KEY);
+      console.log('Gemini provider initialized successfully');
+      return provider.getResponse(prompt);
+    } else {
+      const provider = new OpenAIProvider(API_KEY);
+      console.log('OpenAI provider initialized successfully');
+      return provider.getResponse(prompt);
+    }
+  } catch (error) {
+    console.error('Error in getAIResponse:', error);
+    throw error;
   }
-  return new OpenAIProvider(OPENAI_API_KEY).getResponse(prompt);
 }
 
 function createComment(
@@ -279,10 +292,8 @@ function createComment(
     if (!file.to) {
       return [];
     }
-    
-    const header = `<img src="${BOT_IMAGE_URL}" width="20" height="20" /> **${BOT_NAME}**\n\n`;
     return {
-      body: header + aiResponse.reviewComment,
+      body: aiResponse.reviewComment,
       path: file.to,
       line: Number(aiResponse.lineNumber),
     };
@@ -405,40 +416,57 @@ function hasTestExemption(description: string): boolean {
   );
 }
 
+// Modificar o main para incluir mais logs
 async function main() {
-  const prDetails = await getPRDetails();
-  let diff: string | null;
-  const eventData = JSON.parse(
-    readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
-  );
+  try {
+    console.log('\n=== Starting main execution ===');
+    const prDetails = await getPRDetails();
+    console.log('PR Details retrieved:', {
+      owner: prDetails.owner,
+      repo: prDetails.repo,
+      pull_number: prDetails.pull_number
+    });
 
-  if (eventData.action === "opened" || eventData.action === "reopened" || eventData.action === "synchronize") {
-    if (eventData.action === "synchronize") {
-      const response = await octokit.repos.compareCommits({
-        headers: { accept: "application/vnd.github.v3.diff" },
-        owner: prDetails.owner,
-        repo: prDetails.repo,
-        base: eventData.before,
-        head: eventData.after,
+    let diff: string | null;
+    const eventData = JSON.parse(
+      readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
+    );
+
+    if (eventData.action === "opened" || eventData.action === "reopened" || eventData.action === "synchronize") {
+      if (eventData.action === "synchronize") {
+        const response = await octokit.repos.compareCommits({
+          headers: { accept: "application/vnd.github.v3.diff" },
+          owner: prDetails.owner,
+          repo: prDetails.repo,
+          base: eventData.before,
+          head: eventData.after,
+        });
+        diff = String(response.data);
+      } else {
+        diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+      }
+
+      if (!diff) {
+        console.log('No diff found');
+        return;
+      }
+
+      console.log('Diff found, proceeding with analysis');
+      const parsedDiff = parseDiff(diff);
+      console.log('Number of files in diff:', parsedDiff.length);
+
+      const testAnalysis = await analyzeTests(parsedDiff, prDetails);
+      console.log('Test Analysis Result:', {
+        hasTests: testAnalysis.hasTests,
+        numberOfAffectedFiles: testAnalysis.affectedFiles.length,
+        numberOfMissingTests: testAnalysis.missingTests.length
       });
-      diff = String(response.data);
-    } else {
-      diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-    }
 
-    if (!diff) {
-      console.log("No diff found");
-      return;
-    }
+      // Verifica se existem arquivos que precisam de teste
+      if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
+        const testWarning = `⚠️ Verificação de Testes
 
-    const parsedDiff = parseDiff(diff);
-    const testAnalysis = await analyzeTests(parsedDiff, prDetails);
-
-    // Verifica se existem arquivos que precisam de teste
-    if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
-      const testWarning = `<img src="${BOT_IMAGE_URL}" width="20" height="20" /> **${BOT_NAME} - Verificação de Testes**
-
-⚠️ Esta PR contém alterações em arquivos que requerem testes, mas nenhum teste foi encontrado.
+Esta PR contém alterações em arquivos que requerem testes, mas nenhum teste foi encontrado.
 
 Arquivos que precisam de testes:
 ${testAnalysis.missingTests.map(file => `- \`${file}\``).join('\n')}
@@ -454,31 +482,35 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
 - "test exempt"
 - "no tests needed"`;
 
-      await octokit.issues.createComment({
-        owner: prDetails.owner,
-        repo: prDetails.repo,
-        issue_number: prDetails.pull_number,
-        body: testWarning
-      });
-      
-      // Se AVALIAR_TEST_PR for true, encerra aqui
-      if (AVALIAR_TEST_PR) {
-        return;
+        await octokit.issues.createComment({
+          owner: prDetails.owner,
+          repo: prDetails.repo,
+          issue_number: prDetails.pull_number,
+          body: testWarning
+        });
+        
+        // Se AVALIAR_TEST_PR for true, encerra aqui
+        if (AVALIAR_TEST_PR) {
+          return;
+        }
+      }
+
+      // Continua com a análise normal do código apenas se AVALIAR_TEST_PR for false
+      if (!AVALIAR_TEST_PR) {
+        const excludePatterns = core.getInput("exclude").split(",").map(s => s.trim());
+        const filteredDiff = parsedDiff.filter(file => 
+          !excludePatterns.some(pattern => minimatch(file.to ?? "", pattern))
+        );
+
+        const comments = await analyzeCode(filteredDiff, prDetails);
+        if (comments.length > 0) {
+          await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+        }
       }
     }
-
-    // Continua com a análise normal do código apenas se AVALIAR_TEST_PR for false
-    if (!AVALIAR_TEST_PR) {
-      const excludePatterns = core.getInput("exclude").split(",").map(s => s.trim());
-      const filteredDiff = parsedDiff.filter(file => 
-        !excludePatterns.some(pattern => minimatch(file.to ?? "", pattern))
-      );
-
-      const comments = await analyzeCode(filteredDiff, prDetails);
-      if (comments.length > 0) {
-        await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-      }
-    }
+  } catch (error) {
+    console.error('Main execution error:', error);
+    throw error;
   }
 }
 

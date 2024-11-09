@@ -16,10 +16,8 @@ jobs:
         uses: freeedcom/ai-codereviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_PROVIDER: "gemini"  # Definir explicitamente o provider
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL: "gemini-pro"
+          AI_PROVIDER: "gemini"
+          API_KEY: ${{ secrets.GOOGLE_API_KEY }}  # ou secrets.OPENAI_API_KEY se usando OpenAI
+          MODEL: "gemini-pro"  # ou "gpt-4" se usando OpenAI
           exclude: "yarn.lock,dist/**"
-          BOT_NAME: "quatrodois"
-          BOT_IMAGE_URL: "https://avatars.githubusercontent.com/u/123456789?v=4"
           AVALIAR_TEST_PR: "true"
