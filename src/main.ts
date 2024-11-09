@@ -4,10 +4,14 @@ import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
+const AI_PROVIDER: string = core.getInput("AI_PROVIDER");
+const GOOGLE_API_KEY: string = core.getInput("GOOGLE_API_KEY");
+const GEMINI_MODEL: string = core.getInput("GEMINI_MODEL");
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -110,40 +114,85 @@ ${chunk.changes
 `;
 }
 
+interface AIProvider {
+  getResponse(prompt: string): Promise<Array<{
+    lineNumber: string;
+    reviewComment: string;
+  }> | null>;
+}
+
+class OpenAIProvider implements AIProvider {
+  private openai: OpenAI;
+
+  constructor(apiKey: string) {
+    this.openai = new OpenAI({ apiKey });
+  }
+
+  async getResponse(prompt: string) {
+    const queryConfig = {
+      model: OPENAI_API_MODEL,
+      temperature: 0.2,
+      max_tokens: 700,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+    };
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        ...queryConfig,
+        ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
+          ? { response_format: { type: "json_object" } }
+          : {}),
+        messages: [{ role: "system", content: prompt }],
+      });
+
+      const res = response.choices[0].message?.content?.trim() || "{}";
+      return JSON.parse(res).reviews;
+    } catch (error) {
+      console.error("OpenAI Error:", error);
+      return null;
+    }
+  }
+}
+
+class GeminiProvider implements AIProvider {
+  private genAI: GoogleGenerativeAI;
+
+  constructor(apiKey: string) {
+    this.genAI = new GoogleGenerativeAI(apiKey);
+  }
+
+  async getResponse(prompt: string) {
+    try {
+      const model = this.genAI.getGenerativeModel({ model: GEMINI_MODEL });
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
+      return JSON.parse(text).reviews;
+    } catch (error) {
+      console.error("Gemini Error:", error);
+      return null;
+    }
+  }
+}
+
 async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
   reviewComment: string;
 }> | null> {
-  const queryConfig = {
-    model: OPENAI_API_MODEL,
-    temperature: 0.2,
-    max_tokens: 700,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0,
-  };
+  let provider: AIProvider;
 
-  try {
-    const response = await openai.chat.completions.create({
-      ...queryConfig,
-      // return JSON if the model supports it:
-      ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
-        ? { response_format: { type: "json_object" } }
-        : {}),
-      messages: [
-        {
-          role: "system",
-          content: prompt,
-        },
-      ],
-    });
-
-    const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
-  } catch (error) {
-    console.error("Error:", error);
-    return null;
+  if (AI_PROVIDER === 'gemini') {
+    if (!GOOGLE_API_KEY) {
+      throw new Error('GOOGLE_API_KEY is required when using Gemini');
+    }
+    provider = new GeminiProvider(GOOGLE_API_KEY);
+  } else {
+    provider = new OpenAIProvider(OPENAI_API_KEY);
   }
+
+  return provider.getResponse(prompt);
 }
 
 function createComment(

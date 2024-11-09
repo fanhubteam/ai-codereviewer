@@ -15,6 +15,17 @@ inputs:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
     default: ""
+  AI_PROVIDER:
+    description: "AI provider to use (openai or gemini)"
+    required: false
+    default: "openai"
+  GOOGLE_API_KEY:
+    description: "Google API key for Gemini"
+    required: false
+  GEMINI_MODEL:
+    description: "Gemini model to use"
+    required: false
+    default: "gemini-pro"
 runs:
   using: "node16"
   main: "dist/index.js"
