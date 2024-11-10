@@ -45,6 +45,14 @@ const TEST_PATTERNS = [
   "**/unittest/**"
 ];
 
+const EXEMPTION_KEYWORDS = [
+  'no tests needed',
+  'test exempt',
+  'skip tests',
+  'sem necessidade de teste',
+  'não requer teste'
+];
+
 interface PRDetails {
   owner: string;
   repo: string;
@@ -327,6 +335,19 @@ Response:`;
   }
 }
 
+// Centralizar a lógica de seleção do provedor de IA
+function getAIProvider(): AIProvider {
+  if (!API_KEY) {
+    throw new Error('API_KEY is required');
+  }
+
+  if (AI_PROVIDER === 'gemini') {
+    return new GeminiProvider(API_KEY);
+  } else {
+    return new OpenAIProvider(API_KEY);
+  }
+}
+
 // Modificar a função getAIResponse com mais logs
 async function getAIResponse(prompt: string): Promise<Array<{
   lineNumber: string;
@@ -336,19 +357,9 @@ async function getAIResponse(prompt: string): Promise<Array<{
   console.log('Selecting AI provider:', AI_PROVIDER);
   
   try {
-    if (!API_KEY) {
-      throw new Error('API_KEY is required');
-    }
-
-    if (AI_PROVIDER === 'gemini') {
-      const provider = new GeminiProvider(API_KEY);
-      console.log('Gemini provider initialized successfully');
-      return provider.getResponse(prompt);
-    } else {
-      const provider = new OpenAIProvider(API_KEY);
-      console.log('OpenAI provider initialized successfully');
-      return provider.getResponse(prompt);
-    }
+    const provider = getAIProvider();
+    console.log(`${AI_PROVIDER.charAt(0).toUpperCase() + AI_PROVIDER.slice(1)} provider initialized successfully`);
+    return provider.getResponse(prompt);
   } catch (error) {
     console.error('Error in getAIResponse:', error);
     throw error;
@@ -478,15 +489,7 @@ async function analyzeTests(parsedDiff: File[], prDetails: PRDetails): Promise<T
 }
 
 function hasTestExemption(description: string): boolean {
-  const exemptionKeywords = [
-    'no tests needed',
-    'test exempt',
-    'skip tests',
-    'sem necessidade de teste',
-    'não requer teste'
-  ];
-  
-  return exemptionKeywords.some(keyword => 
+  return EXEMPTION_KEYWORDS.some(keyword => 
     description.toLowerCase().includes(keyword.toLowerCase())
   );
 }
@@ -528,24 +531,13 @@ function isCodeReviewCommand(comment: string): boolean {
 
 // Adicionar função para obter detalhes da isenção
 async function getTestExemptionDetails(description: string): Promise<{ isExempt: boolean; reason: string }> {
-  const exemptionKeywords = [
-    'no tests needed',
-    'test exempt',
-    'skip tests',
-    'sem necessidade de teste',
-    'não requer teste'
-  ];
-  
-  const isExempt = exemptionKeywords.some(keyword => 
-    description.toLowerCase().includes(keyword.toLowerCase())
-  );
+  const isExempt = hasTestExemption(description);
 
   if (!isExempt) {
     return { isExempt: false, reason: '' };
   }
 
-  // Usa o LLM para extrair a razão
-  const extractedReason = await extractTestExemptionReason(description, AI_PROVIDER);
+  const extractedReason = await extractTestExemptionReason(description);
   
   return { 
     isExempt: true, 
@@ -553,7 +545,7 @@ async function getTestExemptionDetails(description: string): Promise<{ isExempt:
   };
 }
 
-async function extractTestExemptionReason(description: string, aiProvider: string): Promise<string | null> {
+async function extractTestExemptionReason(description: string): Promise<string | null> {
   const prompt = `Analise o texto abaixo e extraia a justificativa para a não necessidade de testes.
 Se não houver uma justificativa clara, tente inferir do contexto.
 Retorne apenas um JSON com a estrutura: {"reason": "justificativa em português"}
@@ -563,13 +555,7 @@ Texto para análise:
 ${description}`;
 
   try {
-    let provider: AIProvider;
-    if (aiProvider === 'gemini') {
-      provider = new GeminiProvider(API_KEY);
-    } else {
-      provider = new OpenAIProvider(API_KEY);
-    }
-
+    const provider = getAIProvider();
     const response = await provider.processReason(prompt);
     if (!response) return null;
 
