@@ -51,7 +51,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_PROVIDER: "gemini"
           API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          MODEL: "gemini-pro"
+          MODEL: "gemini-1.5-flash-latest"
           exclude: "yarn.lock,dist/**"
           AVALIAR_TEST_PR: "true"
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
