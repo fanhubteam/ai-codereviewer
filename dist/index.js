@@ -235,7 +235,18 @@ class OpenAIProvider {
     processReason(prompt, jsonResponse = false) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            const completion = yield this.openai.chat.completions.create(Object.assign({ model: MODEL, temperature: 0.1, messages: [{ role: "system", content: prompt }] }, (jsonResponse && MODEL === "gpt-4-1106-preview"
+            const completion = yield this.openai.chat.completions.create(Object.assign({ model: MODEL, temperature: 0.1, messages: [
+                    {
+                        role: "system",
+                        content: jsonResponse ?
+                            "You are a code review assistant that always responds in valid JSON format." :
+                            "You are a code review assistant."
+                    },
+                    {
+                        role: "user",
+                        content: prompt
+                    }
+                ] }, (jsonResponse && MODEL === "gpt-4-1106-preview"
                 ? { response_format: { type: "json_object" } }
                 : {})));
             const content = (_a = completion.choices[0].message) === null || _a === void 0 ? void 0 : _a.content;
@@ -304,7 +315,7 @@ Response:`;
         });
     }
     // Adicionar método para processar prompts de razão
-    processReason(prompt) {
+    processReason(prompt, jsonResponse = false) {
         return __awaiter(this, void 0, void 0, function* () {
             const model = this.genAI.getGenerativeModel({
                 model: MODEL,
@@ -314,8 +325,20 @@ Response:`;
                     topK: 1,
                 }
             });
+            if (jsonResponse) {
+                prompt = `${prompt}\n\nIMPORTANT: You must respond ONLY with a valid JSON object. No additional text.`;
+            }
             const result = yield model.generateContent(prompt);
-            return result.response.text();
+            const response = result.response.text();
+            if (jsonResponse) {
+                // Extract JSON from response for Gemini
+                const jsonMatch = response.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                    throw new Error('No valid JSON found in Gemini response');
+                }
+                return jsonMatch[0];
+            }
+            return response;
         });
     }
 }
@@ -485,42 +508,53 @@ function isCodeReviewCommand(comment) {
 // Modificar a função extractTestExemptionReason para gerar uma mensagem detalhada usando o LLM
 function extractTestExemptionReason(description) {
     return __awaiter(this, void 0, void 0, function* () {
-        const prompt = `Você é um assistente especializado em revisão de código. 
-Analise a descrição da PR abaixo e:
-1. Identifique a justificativa específica para a isenção de testes
-2. Avalie se a justificativa é válida e clara
-3. Extraia os pontos principais que justificam a isenção
-4. Formate uma resposta estruturada
+        const prompt = `Analise o texto abaixo e extraia a justificativa para a isenção de testes.
+Se encontrar uma justificativa, avalie sua validade e formate uma resposta detalhada.
 
-Descrição da PR:
+Texto da PR:
+---
 ${description}
+---
 
-Retorne a resposta no seguinte formato JSON:
+Requisitos:
+1. Identifique especificamente o trecho que justifica a isenção de testes
+2. Avalie se a justificativa é válida
+3. Explique por que a justificativa é ou não aceitável
+
+Retorne no seguinte formato JSON (importante: mantenha a estrutura exata):
 {
-  "isValidJustification": boolean,
-  "justification": "resumo da justificativa encontrada",
-  "analysis": "avaliação da justificativa",
-  "formattedMessage": "mensagem formatada para incluir na aprovação"
-}
-
-Importante: Se não encontrar uma justificativa clara, retorne isValidJustification como false.`;
+  "isValidJustification": true/false,
+  "justification": "texto extraído que justifica a isenção",
+  "analysis": "sua análise da justificativa",
+  "recommendation": "recomendação final"
+}`;
         try {
             const provider = getAIProvider();
+            console.log('Requesting test exemption analysis from LLM...');
+            // Para OpenAI, sempre solicitar resposta em JSON
             const response = yield provider.processReason(prompt, true);
-            if (!response)
-                return null;
-            const parsed = JSON.parse(response);
-            if (!parsed.isValidJustification) {
-                return "⚠️ Isenção de testes solicitada, mas nenhuma justificativa clara foi encontrada.";
+            console.log('Raw LLM response:', response);
+            let parsed;
+            try {
+                parsed = JSON.parse(response);
             }
-            return `📝 **Justificativa para isenção de testes aceita**
+            catch (e) {
+                console.error('Failed to parse LLM response as JSON:', e);
+                return "⚠️ Erro ao analisar a justificativa. Por favor, forneça uma justificativa clara.";
+            }
+            if (!parsed.isValidJustification) {
+                return "⚠️ Uma justificativa válida para isenção de testes não foi encontrada. Por favor, explique claramente por que os testes não são necessários.";
+            }
+            return `📝 **Análise da Justificativa para Isenção de Testes**
 
-${parsed.formattedMessage}
+> ${parsed.justification}
 
-*Análise*: ${parsed.analysis}`;
+**Análise**: ${parsed.analysis}
+
+**Recomendação**: ${parsed.recommendation}`;
         }
         catch (error) {
-            console.error('Error generating exemption reason message:', error);
+            console.error('Error in extractTestExemptionReason:', error);
             return null;
         }
     });
