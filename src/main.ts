@@ -562,7 +562,55 @@ function isCodeReviewCommand(comment: string): boolean {
   return comment.trim().startsWith('/code_review');
 }
 
-// Modificar a função extractTestExemptionReason para gerar uma mensagem detalhada usando o LLM
+// Add new interface for LLM response structure
+interface TestExemptionResponse {
+  isValidJustification: boolean;
+  justification: string;
+  analysis: string;
+  recommendation: string;
+}
+
+// Add new utility function to validate JSON structure
+function isValidExemptionResponse(data: any): data is TestExemptionResponse {
+  return typeof data === 'object' && data !== null &&
+         typeof data.isValidJustification === 'boolean' &&
+         typeof data.justification === 'string' &&
+         typeof data.analysis === 'string' &&
+         typeof data.recommendation === 'string';
+}
+
+// Add retry function for LLM calls
+async function retryLLMWithError(
+  provider: AIProvider, 
+  originalPrompt: string, 
+  errorDetails: string,
+  maxRetries: number = 2
+): Promise<string> {
+  const retryPrompt = `Ocorreu um erro ao processar a resposta anterior. Por favor, corrija e gere uma nova resposta.
+
+Erro encontrado: ${errorDetails}
+
+IMPORTANTE:
+1. Você DEVE retornar um objeto JSON válido
+2. O JSON deve seguir EXATAMENTE esta estrutura:
+{
+  "isValidJustification": boolean,
+  "justification": "string",
+  "analysis": "string",
+  "recommendation": "string"
+}
+3. Não inclua nenhum texto adicional antes ou depois do JSON
+4. Certifique-se que todos os campos estejam presentes
+
+Prompt original:
+${originalPrompt}
+
+Response:`;
+
+  return provider.processReason(retryPrompt, true);
+}
+
+// Modify extractTestExemptionReason to include retry logic
 async function extractTestExemptionReason(description: string): Promise<string | null> {
   const prompt = `Analise o texto abaixo e extraia a justificativa para a isenção de testes.
 Se encontrar uma justificativa, avalie sua validade e formate uma resposta detalhada.
@@ -589,16 +637,46 @@ Retorne no seguinte formato JSON (importante: mantenha a estrutura exata):
     const provider = getAIProvider();
     console.log('Requesting test exemption analysis from LLM...');
     
-    // Para OpenAI, sempre solicitar resposta em JSON
-    const response = await provider.processReason(prompt, true);
-    console.log('Raw LLM response:', response);
+    let response = await provider.processReason(prompt, true);
+    console.log('Initial LLM response:', response);
 
-    let parsed;
-    try {
-      parsed = JSON.parse(response);
-    } catch (e) {
-      console.error('Failed to parse LLM response as JSON:', e);
-      return "⚠️ Erro ao analisar a justificativa. Por favor, forneça uma justificativa clara.";
+    let parsed: TestExemptionResponse | null = null;
+    let retryCount = 0;
+    const maxRetries = 2;
+
+    while (retryCount < maxRetries) {
+      try {
+        const parsedAttempt = JSON.parse(response);
+        
+        if (isValidExemptionResponse(parsedAttempt)) {
+          parsed = parsedAttempt;
+          break;
+        }
+
+        console.log(`Attempt ${retryCount + 1}: Invalid response structure`);
+        response = await retryLLMWithError(
+          provider,
+          prompt,
+          'A resposta não seguiu a estrutura JSON esperada. Todos os campos são obrigatórios.',
+          maxRetries
+        );
+        retryCount++;
+        
+      } catch (e) {
+        console.log(`Attempt ${retryCount + 1}: JSON parse error`);
+        response = await retryLLMWithError(
+          provider,
+          prompt,
+          'A resposta não é um JSON válido. Por favor, corrija a sintaxe.',
+          maxRetries
+        );
+        retryCount++;
+      }
+    }
+
+    if (!parsed) {
+      console.error('Failed to get valid response after retries');
+      return "⚠️ Não foi possível analisar a justificativa após múltiplas tentativas. Por favor, revise e tente novamente.";
     }
 
     if (!parsed.isValidJustification) {
@@ -612,6 +690,7 @@ Retorne no seguinte formato JSON (importante: mantenha a estrutura exata):
 **Análise**: ${parsed.analysis}
 
 **Recomendação**: ${parsed.recommendation}`;
+
   } catch (error) {
     console.error('Error in extractTestExemptionReason:', error);
     return null;
