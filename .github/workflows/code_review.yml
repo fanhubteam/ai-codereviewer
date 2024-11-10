@@ -1,6 +1,6 @@
 name: Code Review with LLM
 on:
-  pull_request:  # Change from pull_request_target to pull_request
+  pull_request:
     types:
       - opened
       - synchronize
@@ -17,13 +17,14 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}  # Add this line to ensure we checkout the PR code
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Code Review
-        uses: fanhubteam/ai-codereviewer@main  # Ensure this matches the correct repository
+        uses: fanhubteam/ai-codereviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_PROVIDER: "gemini"
-          API_KEY: ${{ secrets.GOOGLE_API_KEY }}  # ou secrets.OPENAI_API_KEY se usando OpenAI
-          MODEL: "gemini-pro"  # ou "gpt-4" se usando OpenAI
+          API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          MODEL: "gemini-pro"
           exclude: "yarn.lock,dist/**"
           AVALIAR_TEST_PR: "true"
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}  # Adicione esta linha
