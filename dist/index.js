@@ -91,20 +91,35 @@ console.log('Has API_KEY:', !!API_KEY);
 console.log('AVALIAR_TEST_PR:', AVALIAR_TEST_PR);
 console.log('========================');
 function getPRDetails() {
-    var _a, _b;
+    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
-        const { repository, number } = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH || "", "utf8"));
+        const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH || "", "utf8"));
+        // Determina o número da PR e o repositório com base no tipo de evento
+        const owner = eventData.repository.owner.login;
+        const repo = eventData.repository.name;
+        let pullNumber;
+        if ((_a = eventData.issue) === null || _a === void 0 ? void 0 : _a.pull_request) {
+            // Caso seja um comentário em PR
+            pullNumber = eventData.issue.number;
+        }
+        else if (eventData.pull_request) {
+            // Caso seja um evento de PR
+            pullNumber = eventData.pull_request.number;
+        }
+        else {
+            throw new Error('Could not determine pull request number');
+        }
         const prResponse = yield octokit.pulls.get({
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
+            owner,
+            repo,
+            pull_number: pullNumber,
         });
         return {
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
-            title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
-            description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
+            owner,
+            repo,
+            pull_number: pullNumber,
+            title: (_b = prResponse.data.title) !== null && _b !== void 0 ? _b : "",
+            description: (_c = prResponse.data.body) !== null && _c !== void 0 ? _c : "",
         };
     });
 }

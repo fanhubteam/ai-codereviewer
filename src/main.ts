@@ -67,18 +67,35 @@ console.log('AVALIAR_TEST_PR:', AVALIAR_TEST_PR);
 console.log('========================');
 
 async function getPRDetails(): Promise<PRDetails> {
-  const { repository, number } = JSON.parse(
+  const eventData = JSON.parse(
     readFileSync(process.env.GITHUB_EVENT_PATH || "", "utf8")
   );
+
+  // Determina o número da PR e o repositório com base no tipo de evento
+  const owner = eventData.repository.owner.login;
+  const repo = eventData.repository.name;
+  let pullNumber: number;
+
+  if (eventData.issue?.pull_request) {
+    // Caso seja um comentário em PR
+    pullNumber = eventData.issue.number;
+  } else if (eventData.pull_request) {
+    // Caso seja um evento de PR
+    pullNumber = eventData.pull_request.number;
+  } else {
+    throw new Error('Could not determine pull request number');
+  }
+
   const prResponse = await octokit.pulls.get({
-    owner: repository.owner.login,
-    repo: repository.name,
-    pull_number: number,
+    owner,
+    repo,
+    pull_number: pullNumber,
   });
+
   return {
-    owner: repository.owner.login,
-    repo: repository.name,
-    pull_number: number,
+    owner,
+    repo,
+    pull_number: pullNumber,
     title: prResponse.data.title ?? "",
     description: prResponse.data.body ?? "",
   };
