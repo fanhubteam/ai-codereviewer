@@ -573,6 +573,67 @@ async function getTestExemptionDetails(description: string): Promise<{ isExempt:
   };
 }
 
+// Add new function to handle webhook notifications
+async function notifyWebhook(
+  prDetails: PRDetails, 
+  eventData: any, 
+  testAnalysis: TestAnalysisResult, 
+  parsedDiff: File[], 
+  testExemptionDetails: { isExempt: boolean; reason: string },
+  isExemptApproval: boolean
+): Promise<void> {
+  if (!WEBHOOK_URL) return;
+
+  try {
+    await sendWebhook({
+      repository: {
+        full_name: `${prDetails.owner}/${prDetails.repo}`,
+        name: prDetails.repo,
+        owner: prDetails.owner,
+        url: `https://github.com/${prDetails.owner}/${prDetails.repo}`
+      },
+      pull_request: {
+        number: prDetails.pull_number,
+        title: prDetails.title,
+        description: prDetails.description,
+        url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`,
+        author: {
+          login: prDetails.author.login,
+          name: prDetails.author.name,
+          profile_url: `https://github.com/${prDetails.author.login}`
+        },
+        created_at: eventData.pull_request?.created_at,
+        updated_at: eventData.pull_request?.updated_at,
+        state: eventData.pull_request?.state,
+        draft: eventData.pull_request?.draft || false,
+        labels: eventData.pull_request?.labels || []
+      },
+      analysis: {
+        missing_tests: testAnalysis.missingTests,
+        affected_files: testAnalysis.affectedFiles,
+        has_tests: testAnalysis.hasTests,
+        total_files_analyzed: parsedDiff.length,
+        test_exemption: {
+          is_exempt: testExemptionDetails.isExempt,
+          reason: testExemptionDetails.reason,
+          detected_keyword: testExemptionDetails.isExempt,
+          approved_with_exemption: isExemptApproval
+        },
+        needs_tests: testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        action: eventData.action,
+        triggered_by: eventData.sender?.login,
+        event_type: eventData.comment ? 'comment_command' : 'pr_event'
+      }
+    });
+    console.log('Webhook sent successfully');
+  } catch (error) {
+    console.error('Failed to send webhook:', error);
+  }
+}
+
 // Modificar o main para incluir verificação de comentários
 async function main() {
   try {
@@ -667,62 +728,9 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
         body: testWarning
       });
       
-      // Enviar webhook se URL estiver configurada
-      if (WEBHOOK_URL) {
-        try {
-          await sendWebhook({
-            // Informações do repositório
-            repository: {
-              full_name: `${prDetails.owner}/${prDetails.repo}`,
-              name: prDetails.repo,
-              owner: prDetails.owner,
-              url: `https://github.com/${prDetails.owner}/${prDetails.repo}`
-            },
-            // Informações da PR
-            pull_request: {
-              number: prDetails.pull_number,
-              title: prDetails.title,
-              description: prDetails.description,
-              url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`,
-              author: {
-                login: prDetails.author.login,
-                name: prDetails.author.name,
-                profile_url: `https://github.com/${prDetails.author.login}`
-              },
-              created_at: eventData.pull_request?.created_at,
-              updated_at: eventData.pull_request?.updated_at,
-              state: eventData.pull_request?.state,
-              draft: eventData.pull_request?.draft || false,
-              labels: eventData.pull_request?.labels || []
-            },
-            // Informações da análise
-            analysis: {
-              missing_tests: testAnalysis.missingTests,
-              affected_files: testAnalysis.affectedFiles,
-              has_tests: testAnalysis.hasTests,
-              total_files_analyzed: parsedDiff.length,
-              test_exemption: {
-                is_exempt: testExemptionDetails.isExempt,
-                reason: testExemptionDetails.reason,
-                detected_keyword: testExemptionDetails.isExempt ? true : false
-              },
-              needs_tests: testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests
-            },
-            // Metadados
-            metadata: {
-              timestamp: new Date().toISOString(),
-              action: eventData.action,
-              triggered_by: eventData.sender?.login,
-              event_type: eventData.comment ? 'comment_command' : 'pr_event'
-            }
-          });
-          console.log('Webhook sent successfully with test exemption information');
-        } catch (error) {
-          console.error('Failed to send webhook:', error);
-        }
-      }
+      // Notify webhook about test requirements
+      await notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, false);
 
-      // Se AVALIAR_TEST_PR for true, encerra aqui
       if (AVALIAR_TEST_PR) {
         return;
       }
@@ -745,12 +753,17 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
     // Adiciona aprovação se não houver problemas
     if (!hasIssues) {
       let approvalBody: string;
+      let isExemptApproval = false;
 
       if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && testExemptionDetails.isExempt) {
-        // Aprovação com exceção e mensagem detalhada
+        isExemptApproval = true;
         approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado. Observação sobre a isenção de testes:\n\n${testExemptionDetails.reason}`;
+        
+        // Notify webhook about approval with exemption
+        await notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, true);
       } else {
         approvalBody = "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos.";
+        // Clean LGTM - no webhook needed
       }
 
       await createReviewComment(

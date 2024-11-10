@@ -518,9 +518,66 @@ function getTestExemptionDetails(description) {
         };
     });
 }
+// Add new function to handle webhook notifications
+function notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, isExemptApproval) {
+    var _a, _b, _c, _d, _e, _f;
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!WEBHOOK_URL)
+            return;
+        try {
+            yield sendWebhook({
+                repository: {
+                    full_name: `${prDetails.owner}/${prDetails.repo}`,
+                    name: prDetails.repo,
+                    owner: prDetails.owner,
+                    url: `https://github.com/${prDetails.owner}/${prDetails.repo}`
+                },
+                pull_request: {
+                    number: prDetails.pull_number,
+                    title: prDetails.title,
+                    description: prDetails.description,
+                    url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`,
+                    author: {
+                        login: prDetails.author.login,
+                        name: prDetails.author.name,
+                        profile_url: `https://github.com/${prDetails.author.login}`
+                    },
+                    created_at: (_a = eventData.pull_request) === null || _a === void 0 ? void 0 : _a.created_at,
+                    updated_at: (_b = eventData.pull_request) === null || _b === void 0 ? void 0 : _b.updated_at,
+                    state: (_c = eventData.pull_request) === null || _c === void 0 ? void 0 : _c.state,
+                    draft: ((_d = eventData.pull_request) === null || _d === void 0 ? void 0 : _d.draft) || false,
+                    labels: ((_e = eventData.pull_request) === null || _e === void 0 ? void 0 : _e.labels) || []
+                },
+                analysis: {
+                    missing_tests: testAnalysis.missingTests,
+                    affected_files: testAnalysis.affectedFiles,
+                    has_tests: testAnalysis.hasTests,
+                    total_files_analyzed: parsedDiff.length,
+                    test_exemption: {
+                        is_exempt: testExemptionDetails.isExempt,
+                        reason: testExemptionDetails.reason,
+                        detected_keyword: testExemptionDetails.isExempt,
+                        approved_with_exemption: isExemptApproval
+                    },
+                    needs_tests: testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests
+                },
+                metadata: {
+                    timestamp: new Date().toISOString(),
+                    action: eventData.action,
+                    triggered_by: (_f = eventData.sender) === null || _f === void 0 ? void 0 : _f.login,
+                    event_type: eventData.comment ? 'comment_command' : 'pr_event'
+                }
+            });
+            console.log('Webhook sent successfully');
+        }
+        catch (error) {
+            console.error('Failed to send webhook:', error);
+        }
+    });
+}
 // Modificar o main para incluir verificação de comentários
 function main() {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
         try {
             console.log('\n=== Starting main execution ===');
@@ -597,62 +654,8 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                     issue_number: prDetails.pull_number,
                     body: testWarning
                 });
-                // Enviar webhook se URL estiver configurada
-                if (WEBHOOK_URL) {
-                    try {
-                        yield sendWebhook({
-                            // Informações do repositório
-                            repository: {
-                                full_name: `${prDetails.owner}/${prDetails.repo}`,
-                                name: prDetails.repo,
-                                owner: prDetails.owner,
-                                url: `https://github.com/${prDetails.owner}/${prDetails.repo}`
-                            },
-                            // Informações da PR
-                            pull_request: {
-                                number: prDetails.pull_number,
-                                title: prDetails.title,
-                                description: prDetails.description,
-                                url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`,
-                                author: {
-                                    login: prDetails.author.login,
-                                    name: prDetails.author.name,
-                                    profile_url: `https://github.com/${prDetails.author.login}`
-                                },
-                                created_at: (_c = eventData.pull_request) === null || _c === void 0 ? void 0 : _c.created_at,
-                                updated_at: (_d = eventData.pull_request) === null || _d === void 0 ? void 0 : _d.updated_at,
-                                state: (_e = eventData.pull_request) === null || _e === void 0 ? void 0 : _e.state,
-                                draft: ((_f = eventData.pull_request) === null || _f === void 0 ? void 0 : _f.draft) || false,
-                                labels: ((_g = eventData.pull_request) === null || _g === void 0 ? void 0 : _g.labels) || []
-                            },
-                            // Informações da análise
-                            analysis: {
-                                missing_tests: testAnalysis.missingTests,
-                                affected_files: testAnalysis.affectedFiles,
-                                has_tests: testAnalysis.hasTests,
-                                total_files_analyzed: parsedDiff.length,
-                                test_exemption: {
-                                    is_exempt: testExemptionDetails.isExempt,
-                                    reason: testExemptionDetails.reason,
-                                    detected_keyword: testExemptionDetails.isExempt ? true : false
-                                },
-                                needs_tests: testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests
-                            },
-                            // Metadados
-                            metadata: {
-                                timestamp: new Date().toISOString(),
-                                action: eventData.action,
-                                triggered_by: (_h = eventData.sender) === null || _h === void 0 ? void 0 : _h.login,
-                                event_type: eventData.comment ? 'comment_command' : 'pr_event'
-                            }
-                        });
-                        console.log('Webhook sent successfully with test exemption information');
-                    }
-                    catch (error) {
-                        console.error('Failed to send webhook:', error);
-                    }
-                }
-                // Se AVALIAR_TEST_PR for true, encerra aqui
+                // Notify webhook about test requirements
+                yield notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, false);
                 if (AVALIAR_TEST_PR) {
                     return;
                 }
@@ -670,12 +673,16 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
             // Adiciona aprovação se não houver problemas
             if (!hasIssues) {
                 let approvalBody;
+                let isExemptApproval = false;
                 if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && testExemptionDetails.isExempt) {
-                    // Aprovação com exceção e mensagem detalhada
+                    isExemptApproval = true;
                     approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado. Observação sobre a isenção de testes:\n\n${testExemptionDetails.reason}`;
+                    // Notify webhook about approval with exemption
+                    yield notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, true);
                 }
                 else {
                     approvalBody = "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos.";
+                    // Clean LGTM - no webhook needed
                 }
                 yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, [], // sem comentários específicos
                 "APPROVE", // aprova a PR
