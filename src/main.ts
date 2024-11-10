@@ -635,6 +635,9 @@ async function main() {
     if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
       hasIssues = true;
       const testWarning = `⚠️ Verificação de Testes
+
+Esta PR contém alterações em arquivos que requerem testes, mas nenhum teste foi encontrado.
+
 Arquivos que precisam de testes:
 ${testAnalysis.missingTests.map(file => `- \`${file}\``).join('\n')}
 
@@ -728,8 +731,19 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
 
       const comments = await analyzeCode(filteredDiff, prDetails);
       if (comments.length > 0) {
+        hasIssues = true;
         await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
       }
+    }
+
+    // Adiciona comentário LGTM se não houver problemas
+    if (!hasIssues) {
+      await octokit.issues.createComment({
+        owner: prDetails.owner,
+        repo: prDetails.repo,
+        issue_number: prDetails.pull_number,
+        body: "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos."
+      });
     }
 
   } catch (error) {
