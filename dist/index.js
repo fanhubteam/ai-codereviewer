@@ -482,41 +482,40 @@ function sendWebhook(data) {
 function isCodeReviewCommand(comment) {
     return comment.trim().startsWith('/code_review');
 }
-// Adicionar função para obter detalhes da isenção
+// Modificar a função extractTestExemptionReason para gerar uma mensagem detalhada usando o LLM
+function extractTestExemptionReason(description) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const prompt = `Você é um assistente especializado em revisão de código. Abaixo está a descrição de uma pull request onde o autor solicitou isenção de testes. Analise a justificativa fornecida e elabore uma mensagem de aprovação que inclua um resumo da justificativa, destacando como isso afeta a decisão de aprovação.
+
+Descrição da PR:
+${description}
+
+Responda em português com uma mensagem adequada para incluir na aprovação da PR. Seja claro e conciso.`;
+        try {
+            const provider = getAIProvider();
+            const response = yield provider.processReason(prompt);
+            if (!response)
+                return null;
+            return response.trim(); // Retorna a mensagem gerada pelo LLM
+        }
+        catch (error) {
+            console.error('Error generating exemption reason message:', error);
+            return null;
+        }
+    });
+}
+// Ajustar a função getTestExemptionDetails para usar a mensagem detalhada
 function getTestExemptionDetails(description) {
     return __awaiter(this, void 0, void 0, function* () {
         const isExempt = hasTestExemption(description);
         if (!isExempt) {
             return { isExempt: false, reason: '' };
         }
-        const extractedReason = yield extractTestExemptionReason(description);
+        const detailedReason = yield extractTestExemptionReason(description);
         return {
             isExempt: true,
-            reason: extractedReason || 'Isenção de testes solicitada sem justificativa explícita'
+            reason: detailedReason || 'Isenção de testes solicitada, mas nenhuma justificativa detalhada foi fornecida.'
         };
-    });
-}
-function extractTestExemptionReason(description) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const prompt = `Analise o texto abaixo e extraia a justificativa para a não necessidade de testes.
-Se não houver uma justificativa clara, tente inferir do contexto.
-Retorne apenas um JSON com a estrutura: {"reason": "justificativa em português"}
-Se não encontrar nenhuma justificativa possível, retorne {"reason": null}
-
-Texto para análise:
-${description}`;
-        try {
-            const provider = getAIProvider();
-            const response = yield provider.processReason(prompt);
-            if (!response)
-                return null;
-            const parsed = JSON.parse(response);
-            return parsed.reason;
-        }
-        catch (error) {
-            console.error('Error extracting test exemption reason:', error);
-            return null;
-        }
     });
 }
 // Modificar o main para incluir verificação de comentários
@@ -601,7 +600,6 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                 // Enviar webhook se URL estiver configurada
                 if (WEBHOOK_URL) {
                     try {
-                        const testExemptionDetails = yield getTestExemptionDetails(prDetails.description);
                         yield sendWebhook({
                             // Informações do repositório
                             repository: {
@@ -673,8 +671,8 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
             if (!hasIssues) {
                 let approvalBody;
                 if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && testExemptionDetails.isExempt) {
-                    // Aprovação com exceção
-                    approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado, mas foi identificada uma isenção de testes:\n\n_${testExemptionDetails.reason}_`;
+                    // Aprovação com exceção e mensagem detalhada
+                    approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado. Observação sobre a isenção de testes:\n\n${testExemptionDetails.reason}`;
                 }
                 else {
                     approvalBody = "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos.";
