@@ -312,7 +312,7 @@ function needsTests(file) {
     if (TEST_PATTERNS.some(pattern => (0, minimatch_1.default)(filename, pattern))) {
         return false;
     }
-    // Lista de extensões de arquivos que geralmente precisam de testes
+    // Lista de extens��es de arquivos que geralmente precisam de testes
     const testableExtensions = [
         '.py',
         '.js',
@@ -418,19 +418,34 @@ function sendWebhook(data) {
         });
     });
 }
-// Modificar o main para incluir mais logs
+// Adicionar função para verificar se é um comando válido
+function isCodeReviewCommand(comment) {
+    return comment.trim().startsWith('/code_review');
+}
+// Modificar o main para incluir verificação de comentários
 function main() {
-    var _a;
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
         try {
             console.log('\n=== Starting main execution ===');
             console.log('Event path:', process.env.GITHUB_EVENT_PATH);
             const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
-            // Add debug log for event type
             console.log('Event type:', eventData.action);
-            // Check if it's a pull request event
-            if (!eventData.pull_request) {
-                console.error('Not a pull request event');
+            // Verificar se é um comentário em PR com comando /code_review
+            if (eventData.comment) {
+                if (!((_b = eventData.issue) === null || _b === void 0 ? void 0 : _b.pull_request)) {
+                    console.log('Comment is not on a pull request, ignoring');
+                    return;
+                }
+                if (!isCodeReviewCommand(eventData.comment.body)) {
+                    console.log('Comment is not a code review command, ignoring');
+                    return;
+                }
+                console.log('Code review command detected');
+            }
+            // Se não for comentário, verifica se é PR
+            else if (!eventData.pull_request) {
+                console.error('Not a pull request event or comment');
                 return;
             }
             const prDetails = yield getPRDetails();

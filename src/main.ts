@@ -331,7 +331,7 @@ function needsTests(file: File): boolean {
     return false;
   }
 
-  // Lista de extensões de arquivos que geralmente precisam de testes
+  // Lista de extens��es de arquivos que geralmente precisam de testes
   const testableExtensions = [
     '.py',    // Python
     '.js',    // JavaScript
@@ -454,7 +454,12 @@ async function sendWebhook(data: any): Promise<void> {
   });
 }
 
-// Modificar o main para incluir mais logs
+// Adicionar função para verificar se é um comando válido
+function isCodeReviewCommand(comment: string): boolean {
+  return comment.trim().startsWith('/code_review');
+}
+
+// Modificar o main para incluir verificação de comentários
 async function main() {
   try {
     console.log('\n=== Starting main execution ===');
@@ -464,12 +469,25 @@ async function main() {
       readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
     );
     
-    // Add debug log for event type
     console.log('Event type:', eventData.action);
     
-    // Check if it's a pull request event
-    if (!eventData.pull_request) {
-      console.error('Not a pull request event');
+    // Verificar se é um comentário em PR com comando /code_review
+    if (eventData.comment) {
+      if (!eventData.issue?.pull_request) {
+        console.log('Comment is not on a pull request, ignoring');
+        return;
+      }
+
+      if (!isCodeReviewCommand(eventData.comment.body)) {
+        console.log('Comment is not a code review command, ignoring');
+        return;
+      }
+
+      console.log('Code review command detected');
+    }
+    // Se não for comentário, verifica se é PR
+    else if (!eventData.pull_request) {
+      console.error('Not a pull request event or comment');
       return;
     }
 
