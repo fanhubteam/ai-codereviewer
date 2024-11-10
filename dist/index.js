@@ -84,6 +84,13 @@ const TEST_PATTERNS = [
     "**/pytest/**",
     "**/unittest/**"
 ];
+const EXEMPTION_KEYWORDS = [
+    'no tests needed',
+    'test exempt',
+    'skip tests',
+    'sem necessidade de teste',
+    'não requer teste'
+];
 // Adicionar logs iniciais de configuração
 console.log('=== Configuration Debug ===');
 console.log('AI_PROVIDER:', AI_PROVIDER);
@@ -314,25 +321,27 @@ Response:`;
         });
     }
 }
+// Centralizar a lógica de seleção do provedor de IA
+function getAIProvider() {
+    if (!API_KEY) {
+        throw new Error('API_KEY is required');
+    }
+    if (AI_PROVIDER === 'gemini') {
+        return new GeminiProvider(API_KEY);
+    }
+    else {
+        return new OpenAIProvider(API_KEY);
+    }
+}
 // Modificar a função getAIResponse com mais logs
 function getAIResponse(prompt) {
     return __awaiter(this, void 0, void 0, function* () {
         console.log('\n=== getAIResponse Debug ===');
         console.log('Selecting AI provider:', AI_PROVIDER);
         try {
-            if (!API_KEY) {
-                throw new Error('API_KEY is required');
-            }
-            if (AI_PROVIDER === 'gemini') {
-                const provider = new GeminiProvider(API_KEY);
-                console.log('Gemini provider initialized successfully');
-                return provider.getResponse(prompt);
-            }
-            else {
-                const provider = new OpenAIProvider(API_KEY);
-                console.log('OpenAI provider initialized successfully');
-                return provider.getResponse(prompt);
-            }
+            const provider = getAIProvider();
+            console.log(`${AI_PROVIDER.charAt(0).toUpperCase() + AI_PROVIDER.slice(1)} provider initialized successfully`);
+            return provider.getResponse(prompt);
         }
         catch (error) {
             console.error('Error in getAIResponse:', error);
@@ -438,14 +447,7 @@ function analyzeTests(parsedDiff, prDetails) {
     });
 }
 function hasTestExemption(description) {
-    const exemptionKeywords = [
-        'no tests needed',
-        'test exempt',
-        'skip tests',
-        'sem necessidade de teste',
-        'não requer teste'
-    ];
-    return exemptionKeywords.some(keyword => description.toLowerCase().includes(keyword.toLowerCase()));
+    return EXEMPTION_KEYWORDS.some(keyword => description.toLowerCase().includes(keyword.toLowerCase()));
 }
 // Add new function for webhook
 function sendWebhook(data) {
@@ -482,26 +484,18 @@ function isCodeReviewCommand(comment) {
 // Adicionar função para obter detalhes da isenção
 function getTestExemptionDetails(description) {
     return __awaiter(this, void 0, void 0, function* () {
-        const exemptionKeywords = [
-            'no tests needed',
-            'test exempt',
-            'skip tests',
-            'sem necessidade de teste',
-            'não requer teste'
-        ];
-        const isExempt = exemptionKeywords.some(keyword => description.toLowerCase().includes(keyword.toLowerCase()));
+        const isExempt = hasTestExemption(description);
         if (!isExempt) {
             return { isExempt: false, reason: '' };
         }
-        // Usa o LLM para extrair a razão
-        const extractedReason = yield extractTestExemptionReason(description, AI_PROVIDER);
+        const extractedReason = yield extractTestExemptionReason(description);
         return {
             isExempt: true,
             reason: extractedReason || 'Isenção de testes solicitada sem justificativa explícita'
         };
     });
 }
-function extractTestExemptionReason(description, aiProvider) {
+function extractTestExemptionReason(description) {
     return __awaiter(this, void 0, void 0, function* () {
         const prompt = `Analise o texto abaixo e extraia a justificativa para a não necessidade de testes.
 Se não houver uma justificativa clara, tente inferir do contexto.
@@ -511,13 +505,7 @@ Se não encontrar nenhuma justificativa possível, retorne {"reason": null}
 Texto para análise:
 ${description}`;
         try {
-            let provider;
-            if (aiProvider === 'gemini') {
-                provider = new GeminiProvider(API_KEY);
-            }
-            else {
-                provider = new OpenAIProvider(API_KEY);
-            }
+            const provider = getAIProvider();
             const response = yield provider.processReason(prompt);
             if (!response)
                 return null;
@@ -581,8 +569,10 @@ function main() {
                 numberOfAffectedFiles: testAnalysis.affectedFiles.length,
                 numberOfMissingTests: testAnalysis.missingTests.length
             });
+            let hasIssues = false;
             // Verifica se existem arquivos que precisam de teste
             if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
+                hasIssues = true;
                 const testWarning = `⚠️ Verificação de Testes
 
 Esta PR contém alterações em arquivos que requerem testes, mas nenhum teste foi encontrado.
@@ -673,8 +663,18 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                 const filteredDiff = parsedDiff.filter(file => !excludePatterns.some(pattern => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); }));
                 const comments = yield analyzeCode(filteredDiff, prDetails);
                 if (comments.length > 0) {
+                    hasIssues = true;
                     yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
                 }
+            }
+            // Adiciona comentário LGTM se não houver problemas
+            if (!hasIssues) {
+                yield octokit.issues.createComment({
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    issue_number: prDetails.pull_number,
+                    body: "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos."
+                });
             }
         }
         catch (error) {
