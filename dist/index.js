@@ -485,18 +485,39 @@ function isCodeReviewCommand(comment) {
 // Modificar a função extractTestExemptionReason para gerar uma mensagem detalhada usando o LLM
 function extractTestExemptionReason(description) {
     return __awaiter(this, void 0, void 0, function* () {
-        const prompt = `Você é um assistente especializado em revisão de código. Abaixo está a descrição de uma pull request onde o autor solicitou isenção de testes. Analise a justificativa fornecida e elabore uma mensagem de aprovação que inclua um resumo da justificativa, destacando como isso afeta a decisão de aprovação.
+        const prompt = `Você é um assistente especializado em revisão de código. 
+Analise a descrição da PR abaixo e:
+1. Identifique a justificativa específica para a isenção de testes
+2. Avalie se a justificativa é válida e clara
+3. Extraia os pontos principais que justificam a isenção
+4. Formate uma resposta estruturada
 
 Descrição da PR:
 ${description}
 
-Responda em português com uma mensagem adequada para incluir na aprovação da PR. Seja claro e conciso.`;
+Retorne a resposta no seguinte formato JSON:
+{
+  "isValidJustification": boolean,
+  "justification": "resumo da justificativa encontrada",
+  "analysis": "avaliação da justificativa",
+  "formattedMessage": "mensagem formatada para incluir na aprovação"
+}
+
+Importante: Se não encontrar uma justificativa clara, retorne isValidJustification como false.`;
         try {
             const provider = getAIProvider();
-            const response = yield provider.processReason(prompt);
+            const response = yield provider.processReason(prompt, true);
             if (!response)
                 return null;
-            return response.trim(); // Retorna a mensagem gerada pelo LLM
+            const parsed = JSON.parse(response);
+            if (!parsed.isValidJustification) {
+                return "⚠️ Isenção de testes solicitada, mas nenhuma justificativa clara foi encontrada.";
+            }
+            return `📝 **Justificativa para isenção de testes aceita**
+
+${parsed.formattedMessage}
+
+*Análise*: ${parsed.analysis}`;
         }
         catch (error) {
             console.error('Error generating exemption reason message:', error);
@@ -672,7 +693,12 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                 let approvalBody;
                 if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && testExemptionDetails.isExempt) {
                     // Aprovação com exceção e mensagem detalhada
-                    approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado. Observação sobre a isenção de testes:\n\n${testExemptionDetails.reason}`;
+                    approvalBody = `✨ **LGTM** - Aprovado com exceção de testes
+
+${testExemptionDetails.reason}
+
+---
+*Esta PR foi aprovada com isenção de testes baseada na justificativa acima.*`;
                 }
                 else {
                     approvalBody = "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos.";
