@@ -390,14 +390,19 @@ async function createReviewComment(
   owner: string,
   repo: string,
   pull_number: number,
-  comments: Array<{ body: string; path: string; line: number }>
+  comments: Array<{ body: string; path: string; line: number }>,
+  event: "COMMENT" | "APPROVE" = "COMMENT"  // Adicionar opção de evento
 ): Promise<void> {
   await octokit.pulls.createReview({
     owner,
     repo,
     pull_number,
     comments,
-    event: "COMMENT",
+    event,
+    // Adicionar body apenas se for aprovação
+    ...(event === "APPROVE" ? {
+      body: "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos."
+    } : {})
   });
 }
 
@@ -736,14 +741,15 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
       }
     }
 
-    // Adiciona comentário LGTM se não houver problemas
+    // Adiciona aprovação se não houver problemas
     if (!hasIssues) {
-      await octokit.issues.createComment({
-        owner: prDetails.owner,
-        repo: prDetails.repo,
-        issue_number: prDetails.pull_number,
-        body: "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos."
-      });
+      await createReviewComment(
+        prDetails.owner,
+        prDetails.repo,
+        prDetails.pull_number,
+        [], // sem comentários específicos
+        "APPROVE" // aprova a PR
+      );
     }
 
   } catch (error) {

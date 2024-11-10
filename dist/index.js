@@ -361,15 +361,16 @@ function createComment(file, chunk, aiResponses) {
         };
     });
 }
-function createReviewComment(owner, repo, pull_number, comments) {
+function createReviewComment(owner, repo, pull_number, comments, event = "COMMENT" // Adicionar opção de evento
+) {
     return __awaiter(this, void 0, void 0, function* () {
-        yield octokit.pulls.createReview({
-            owner,
+        yield octokit.pulls.createReview(Object.assign({ owner,
             repo,
             pull_number,
             comments,
-            event: "COMMENT",
-        });
+            event }, (event === "APPROVE" ? {
+            body: "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos."
+        } : {})));
     });
 }
 function needsTests(file) {
@@ -667,14 +668,11 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                     yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
                 }
             }
-            // Adiciona comentário LGTM se não houver problemas
+            // Adiciona aprovação se não houver problemas
             if (!hasIssues) {
-                yield octokit.issues.createComment({
-                    owner: prDetails.owner,
-                    repo: prDetails.repo,
-                    issue_number: prDetails.pull_number,
-                    body: "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos."
-                });
+                yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, [], // sem comentários específicos
+                "APPROVE" // aprova a PR
+                );
             }
         }
         catch (error) {
