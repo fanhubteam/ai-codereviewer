@@ -208,43 +208,48 @@ class GeminiProvider implements AIProvider {
           temperature: 0.2,
           topP: 1,
           topK: 1,
-          // Força o modelo a gerar apenas JSON
-          structuredOutput: true,
-          // Define o schema esperado
-          schema: {
-            type: "object",
-            properties: {
-              reviews: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    lineNumber: { type: "string" },
-                    reviewComment: { type: "string" }
-                  },
-                  required: ["lineNumber", "reviewComment"]
-                }
-              }
-            },
-            required: ["reviews"]
-          }
         }
       });
 
-      // Adiciona instruções específicas para forçar JSON
-      const promptWithJson = `${prompt}\nIMPORTANT: You must respond only with valid JSON matching this exact schema:\n{
-        "reviews": [
-          {
-            "lineNumber": "string",
-            "reviewComment": "string"
-          }
-        ]
-      }`;
+      // Força o formato JSON através do prompt
+      const jsonPrompt = `${prompt}
 
-      const result = await model.generateContent(promptWithJson);
+IMPORTANT INSTRUCTIONS:
+1. You must respond ONLY with a valid JSON object
+2. The JSON must follow exactly this structure:
+{
+  "reviews": [
+    {
+      "lineNumber": "string with line number",
+      "reviewComment": "string with review comment"
+    }
+  ]
+}
+3. DO NOT include any explanations or additional text
+4. If there are no comments, respond with {"reviews": []}
+5. Make sure the output is parseable JSON
+
+Response:`;
+
+      const result = await model.generateContent(jsonPrompt);
       const response = result.response;
       const text = response.text();
-      return JSON.parse(text).reviews;
+      
+      // Tenta encontrar JSON válido na resposta
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error('No valid JSON found in response');
+        return null;
+      }
+
+      // Parse e valida o JSON
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsed.reviews)) {
+        console.error('Invalid JSON structure');
+        return null;
+      }
+
+      return parsed.reviews;
     } catch (error) {
       console.error("Gemini Error:", error);
       return null;
@@ -443,9 +448,6 @@ async function main() {
     });
 
     let diff: string | null;
-    const eventData = JSON.parse(
-      readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
-    );
 
     if (eventData.action === "opened" || eventData.action === "reopened" || eventData.action === "synchronize") {
       if (eventData.action === "synchronize") {
