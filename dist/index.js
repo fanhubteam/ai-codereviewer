@@ -648,14 +648,27 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
 - "skip tests"
 - "test exempt"
 - "no tests needed"`;
-                yield octokit.issues.createComment({
-                    owner: prDetails.owner,
-                    repo: prDetails.repo,
-                    issue_number: prDetails.pull_number,
-                    body: testWarning
-                });
-                // Notify webhook about test requirements
-                yield notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, false);
+                // Primeiro, sempre posta o comentário
+                try {
+                    yield octokit.issues.createComment({
+                        owner: prDetails.owner,
+                        repo: prDetails.repo,
+                        issue_number: prDetails.pull_number,
+                        body: testWarning
+                    });
+                }
+                catch (commentError) {
+                    console.error('Error posting comment:', commentError);
+                    throw commentError; // Re-throw to stop execution if comment fails
+                }
+                // Depois tenta enviar o webhook
+                try {
+                    yield notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, false);
+                }
+                catch (webhookError) {
+                    console.error('Webhook notification failed:', webhookError);
+                    // Não interrompe a execução se o webhook falhar
+                }
                 if (AVALIAR_TEST_PR) {
                     return;
                 }
@@ -677,17 +690,28 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                 if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && testExemptionDetails.isExempt) {
                     isExemptApproval = true;
                     approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado. Observação sobre a isenção de testes:\n\n${testExemptionDetails.reason}`;
-                    // Notify webhook about approval with exemption
-                    yield notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, true);
+                    // Primeiro posta o comentário de aprovação
+                    try {
+                        yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, [], "APPROVE", approvalBody);
+                    }
+                    catch (approvalError) {
+                        console.error('Error posting approval:', approvalError);
+                        throw approvalError; // Re-throw to stop execution if approval fails
+                    }
+                    // Depois tenta enviar o webhook
+                    try {
+                        yield notifyWebhook(prDetails, eventData, testAnalysis, parsedDiff, testExemptionDetails, true);
+                    }
+                    catch (webhookError) {
+                        console.error('Webhook notification failed:', webhookError);
+                        // Não interrompe a execução se o webhook falhar
+                    }
                 }
                 else {
                     approvalBody = "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos.";
-                    // Clean LGTM - no webhook needed
+                    // Posta o comentário de aprovação limpa
+                    yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, [], "APPROVE", approvalBody);
                 }
-                yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, [], // sem comentários específicos
-                "APPROVE", // aprova a PR
-                approvalBody // passa a mensagem de aprovação
-                );
             }
         }
         catch (error) {
