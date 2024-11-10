@@ -231,16 +231,14 @@ class OpenAIProvider {
             }
         });
     }
-    // Adicionar método para processar prompts de razão
-    processReason(prompt) {
+    // Modify the processReason method
+    processReason(prompt, jsonResponse = false) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            const completion = yield this.openai.chat.completions.create({
-                model: MODEL,
-                temperature: 0.1,
-                messages: [{ role: "system", content: prompt }],
-                response_format: { type: "json_object" }
-            });
-            const content = completion.choices[0].message.content;
+            const completion = yield this.openai.chat.completions.create(Object.assign({ model: MODEL, temperature: 0.1, messages: [{ role: "system", content: prompt }] }, (jsonResponse && MODEL === "gpt-4-1106-preview"
+                ? { response_format: { type: "json_object" } }
+                : {})));
+            const content = (_a = completion.choices[0].message) === null || _a === void 0 ? void 0 : _a.content;
             if (!content) {
                 throw new Error('OpenAI returned empty response');
             }
@@ -341,7 +339,9 @@ function getAIResponse(prompt) {
         try {
             const provider = getAIProvider();
             console.log(`${AI_PROVIDER.charAt(0).toUpperCase() + AI_PROVIDER.slice(1)} provider initialized successfully`);
-            return provider.getResponse(prompt);
+            const response = yield provider.processReason(prompt, true);
+            const reviews = JSON.parse(response).reviews;
+            return reviews;
         }
         catch (error) {
             console.error('Error in getAIResponse:', error);

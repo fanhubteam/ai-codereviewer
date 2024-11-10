@@ -173,9 +173,7 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 - IMPORTANT: NEVER suggest adding comments to the code.
 - Responda em português.
 
-Review the following code diff in the file "${
-    file.to
-  }" and take the pull request title and description into account when writing the response.
+Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
   
 Pull request title: ${prDetails.title}
 Pull request description:
@@ -201,7 +199,7 @@ interface AIProvider {
     lineNumber: string;
     reviewComment: string;
   }> | null>;
-  processReason(prompt: string): Promise<string>;
+  processReason(prompt: string, jsonResponse?: boolean): Promise<string>;
 }
 
 class OpenAIProvider implements AIProvider {
@@ -238,20 +236,23 @@ class OpenAIProvider implements AIProvider {
     }
   }
 
-  // Adicionar método para processar prompts de razão
-  async processReason(prompt: string): Promise<string> {
+  // Modify the processReason method
+  async processReason(prompt: string, jsonResponse: boolean = false): Promise<string> {
     const completion = await this.openai.chat.completions.create({
       model: MODEL,
       temperature: 0.1,
       messages: [{ role: "system", content: prompt }],
-      response_format: { type: "json_object" }
+      // Conditionally include response_format
+      ...(jsonResponse && MODEL === "gpt-4-1106-preview"
+        ? { response_format: { type: "json_object" } }
+        : {})
     });
-    
-    const content = completion.choices[0].message.content;
+
+    const content = completion.choices[0].message?.content;
     if (!content) {
       throw new Error('OpenAI returned empty response');
     }
-    
+
     return content;
   }
 }
@@ -359,7 +360,9 @@ async function getAIResponse(prompt: string): Promise<Array<{
   try {
     const provider = getAIProvider();
     console.log(`${AI_PROVIDER.charAt(0).toUpperCase() + AI_PROVIDER.slice(1)} provider initialized successfully`);
-    return provider.getResponse(prompt);
+    const response = await provider.processReason(prompt, true);
+    const reviews = JSON.parse(response).reviews;
+    return reviews;
   } catch (error) {
     console.error('Error in getAIResponse:', error);
     throw error;
