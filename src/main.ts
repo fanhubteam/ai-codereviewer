@@ -51,6 +51,10 @@ interface PRDetails {
   pull_number: number;
   title: string;
   description: string;
+  author: {
+    login: string;
+    name: string;
+  };
 }
 
 interface TestAnalysisResult {
@@ -76,12 +80,18 @@ async function getPRDetails(): Promise<PRDetails> {
   const repo = eventData.repository.name;
   let pullNumber: number;
 
+  // Adiciona suporte para obter informações do autor da PR
+  let prAuthor = {
+    login: '',
+    name: ''
+  };
+
   if (eventData.issue?.pull_request) {
-    // Caso seja um comentário em PR
     pullNumber = eventData.issue.number;
+    prAuthor.login = eventData.issue.user.login;
   } else if (eventData.pull_request) {
-    // Caso seja um evento de PR
     pullNumber = eventData.pull_request.number;
+    prAuthor.login = eventData.pull_request.user.login;
   } else {
     throw new Error('Could not determine pull request number');
   }
@@ -92,12 +102,19 @@ async function getPRDetails(): Promise<PRDetails> {
     pull_number: pullNumber,
   });
 
+  // Busca informações detalhadas do usuário
+  const userResponse = await octokit.users.getByUsername({
+    username: prAuthor.login
+  });
+  prAuthor.name = userResponse.data.name || prAuthor.login;
+
   return {
     owner,
     repo,
     pull_number: pullNumber,
     title: prResponse.data.title ?? "",
     description: prResponse.data.body ?? "",
+    author: prAuthor // Adiciona informações do autor
   };
 }
 
@@ -569,14 +586,47 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
       if (WEBHOOK_URL) {
         try {
           await sendWebhook({
-            repository: `${prDetails.owner}/${prDetails.repo}`,
-            pull_request: prDetails.pull_number,
-            title: prDetails.title,
-            missing_tests: testAnalysis.missingTests,
-            affected_files: testAnalysis.affectedFiles,
-            url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`
+            // Informações do repositório
+            repository: {
+              full_name: `${prDetails.owner}/${prDetails.repo}`,
+              name: prDetails.repo,
+              owner: prDetails.owner,
+              url: `https://github.com/${prDetails.owner}/${prDetails.repo}`
+            },
+            // Informações da PR
+            pull_request: {
+              number: prDetails.pull_number,
+              title: prDetails.title,
+              description: prDetails.description,
+              url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`,
+              author: {
+                login: prDetails.author.login,
+                name: prDetails.author.name,
+                profile_url: `https://github.com/${prDetails.author.login}`
+              },
+              created_at: eventData.pull_request?.created_at,
+              updated_at: eventData.pull_request?.updated_at,
+              state: eventData.pull_request?.state,
+              draft: eventData.pull_request?.draft || false,
+              labels: eventData.pull_request?.labels || []
+            },
+            // Informações da análise
+            analysis: {
+              missing_tests: testAnalysis.missingTests,
+              affected_files: testAnalysis.affectedFiles,
+              has_tests: testAnalysis.hasTests,
+              total_files_analyzed: parsedDiff.length,
+              test_exemption: hasTestExemption(prDetails.description),
+            },
+            // Metadados
+            metadata: {
+              timestamp: new Date().toISOString(),
+              action: eventData.action,
+              triggered_by: eventData.sender?.login,
+              event_type: eventData.comment ? 'comment_command' : 'pr_event'
+            }
           });
-          console.log('Webhook sent successfully');
+          console.log('Webhook sent successfully with extended information');
         } catch (error) {
           console.error('Failed to send webhook:', error);
         }

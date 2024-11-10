@@ -98,13 +98,18 @@ function getPRDetails() {
         const owner = eventData.repository.owner.login;
         const repo = eventData.repository.name;
         let pullNumber;
+        // Adiciona suporte para obter informações do autor da PR
+        let prAuthor = {
+            login: '',
+            name: ''
+        };
         if ((_a = eventData.issue) === null || _a === void 0 ? void 0 : _a.pull_request) {
-            // Caso seja um comentário em PR
             pullNumber = eventData.issue.number;
+            prAuthor.login = eventData.issue.user.login;
         }
         else if (eventData.pull_request) {
-            // Caso seja um evento de PR
             pullNumber = eventData.pull_request.number;
+            prAuthor.login = eventData.pull_request.user.login;
         }
         else {
             throw new Error('Could not determine pull request number');
@@ -114,12 +119,18 @@ function getPRDetails() {
             repo,
             pull_number: pullNumber,
         });
+        // Busca informações detalhadas do usuário
+        const userResponse = yield octokit.users.getByUsername({
+            username: prAuthor.login
+        });
+        prAuthor.name = userResponse.data.name || prAuthor.login;
         return {
             owner,
             repo,
             pull_number: pullNumber,
             title: (_b = prResponse.data.title) !== null && _b !== void 0 ? _b : "",
             description: (_c = prResponse.data.body) !== null && _c !== void 0 ? _c : "",
+            author: prAuthor // Adiciona informações do autor
         };
     });
 }
@@ -439,7 +450,7 @@ function isCodeReviewCommand(comment) {
 }
 // Modificar o main para incluir verificação de comentários
 function main() {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     return __awaiter(this, void 0, void 0, function* () {
         try {
             console.log('\n=== Starting main execution ===');
@@ -517,14 +528,47 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                 if (WEBHOOK_URL) {
                     try {
                         yield sendWebhook({
-                            repository: `${prDetails.owner}/${prDetails.repo}`,
-                            pull_request: prDetails.pull_number,
-                            title: prDetails.title,
-                            missing_tests: testAnalysis.missingTests,
-                            affected_files: testAnalysis.affectedFiles,
-                            url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`
+                            // Informações do repositório
+                            repository: {
+                                full_name: `${prDetails.owner}/${prDetails.repo}`,
+                                name: prDetails.repo,
+                                owner: prDetails.owner,
+                                url: `https://github.com/${prDetails.owner}/${prDetails.repo}`
+                            },
+                            // Informações da PR
+                            pull_request: {
+                                number: prDetails.pull_number,
+                                title: prDetails.title,
+                                description: prDetails.description,
+                                url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`,
+                                author: {
+                                    login: prDetails.author.login,
+                                    name: prDetails.author.name,
+                                    profile_url: `https://github.com/${prDetails.author.login}`
+                                },
+                                created_at: (_c = eventData.pull_request) === null || _c === void 0 ? void 0 : _c.created_at,
+                                updated_at: (_d = eventData.pull_request) === null || _d === void 0 ? void 0 : _d.updated_at,
+                                state: (_e = eventData.pull_request) === null || _e === void 0 ? void 0 : _e.state,
+                                draft: ((_f = eventData.pull_request) === null || _f === void 0 ? void 0 : _f.draft) || false,
+                                labels: ((_g = eventData.pull_request) === null || _g === void 0 ? void 0 : _g.labels) || []
+                            },
+                            // Informações da análise
+                            analysis: {
+                                missing_tests: testAnalysis.missingTests,
+                                affected_files: testAnalysis.affectedFiles,
+                                has_tests: testAnalysis.hasTests,
+                                total_files_analyzed: parsedDiff.length,
+                                test_exemption: hasTestExemption(prDetails.description),
+                            },
+                            // Metadados
+                            metadata: {
+                                timestamp: new Date().toISOString(),
+                                action: eventData.action,
+                                triggered_by: (_h = eventData.sender) === null || _h === void 0 ? void 0 : _h.login,
+                                event_type: eventData.comment ? 'comment_command' : 'pr_event'
+                            }
                         });
-                        console.log('Webhook sent successfully');
+                        console.log('Webhook sent successfully with extended information');
                     }
                     catch (error) {
                         console.error('Failed to send webhook:', error);
