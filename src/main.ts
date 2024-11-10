@@ -629,12 +629,12 @@ async function main() {
       numberOfMissingTests: testAnalysis.missingTests.length
     });
 
+    let hasIssues = false;
+
     // Verifica se existem arquivos que precisam de teste
     if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
+      hasIssues = true;
       const testWarning = `⚠️ Verificação de Testes
-
-Esta PR contém alterações em arquivos que requerem testes, mas nenhum teste foi encontrado.
-
 Arquivos que precisam de testes:
 ${testAnalysis.missingTests.map(file => `- \`${file}\``).join('\n')}
 
