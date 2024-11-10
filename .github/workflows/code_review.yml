@@ -15,7 +15,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}  # Add this line to ensure we checkout the PR code
       - name: Code Review
         uses: fanhubteam/ai-codereviewer@main  # Ensure this matches the correct repository
         with:

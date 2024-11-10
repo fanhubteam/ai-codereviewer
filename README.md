@@ -60,6 +60,10 @@ jobs:
 
 ### Using OpenAI (Default)
 
+### Webhook Notifications
+
+You can configure a webhook URL to receive notifications when tests are missing:
+
 ## How It Works
 
 The AI Code Reviewer GitHub Action retrieves the pull request diff, filters out excluded files, and sends code chunks to

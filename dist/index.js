@@ -49,11 +49,14 @@ const rest_1 = __nccwpck_require__(5375);
 const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const generative_ai_1 = __nccwpck_require__(2122);
+const https = __importStar(__nccwpck_require__(5687));
+const http = __importStar(__nccwpck_require__(3685));
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
 const AI_PROVIDER = core.getInput("AI_PROVIDER").toLowerCase();
 const API_KEY = core.getInput("API_KEY");
 const MODEL = core.getInput("MODEL");
 const AVALIAR_TEST_PR = core.getInput("AVALIAR_TEST_PR").toLowerCase() === "true";
+const WEBHOOK_URL = core.getInput("WEBHOOK_URL");
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
 // Modificar a inicialização do OpenAI para ser condicional
 const openai = API_KEY ? new openai_1.default({ apiKey: API_KEY }) : null;
@@ -387,6 +390,34 @@ function hasTestExemption(description) {
     ];
     return exemptionKeywords.some(keyword => description.toLowerCase().includes(keyword.toLowerCase()));
 }
+// Add new function for webhook
+function sendWebhook(data) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!WEBHOOK_URL)
+            return;
+        return new Promise((resolve, reject) => {
+            const url = new URL(WEBHOOK_URL);
+            const options = {
+                hostname: url.hostname,
+                port: url.port || (url.protocol === 'https:' ? 443 : 80),
+                path: url.pathname + url.search,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            };
+            const req = (url.protocol === 'https:' ? https : http).request(options, (res) => {
+                res.on('end', () => resolve());
+            });
+            req.on('error', (error) => {
+                console.error('Webhook Error:', error);
+                reject(error);
+            });
+            req.write(JSON.stringify(data));
+            req.end();
+        });
+    });
+}
 // Modificar o main para incluir mais logs
 function main() {
     var _a;
@@ -461,6 +492,23 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
                         issue_number: prDetails.pull_number,
                         body: testWarning
                     });
+                    // Enviar webhook se URL estiver configurada
+                    if (WEBHOOK_URL) {
+                        try {
+                            yield sendWebhook({
+                                repository: `${prDetails.owner}/${prDetails.repo}`,
+                                pull_request: prDetails.pull_number,
+                                title: prDetails.title,
+                                missing_tests: testAnalysis.missingTests,
+                                affected_files: testAnalysis.affectedFiles,
+                                url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`
+                            });
+                            console.log('Webhook sent successfully');
+                        }
+                        catch (error) {
+                            console.error('Failed to send webhook:', error);
+                        }
+                    }
                     // Se AVALIAR_TEST_PR for true, encerra aqui
                     if (AVALIAR_TEST_PR) {
                         return;

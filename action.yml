@@ -23,6 +23,10 @@ inputs:
     description: "Flag para verificar apenas a existência de testes na PR"
     required: false
     default: "false"
+  WEBHOOK_URL:
+    description: "URL para notificação quando testes estiverem faltando"
+    required: false
+    default: ""
 runs:
   using: "node16"
   main: "dist/index.js"

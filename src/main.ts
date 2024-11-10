@@ -5,12 +5,15 @@ import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as https from 'https';
+import * as http from 'http';
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const AI_PROVIDER: string = core.getInput("AI_PROVIDER").toLowerCase();
 const API_KEY: string = core.getInput("API_KEY");
 const MODEL: string = core.getInput("MODEL");
 const AVALIAR_TEST_PR: boolean = core.getInput("AVALIAR_TEST_PR").toLowerCase() === "true";
+const WEBHOOK_URL: string = core.getInput("WEBHOOK_URL");
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -421,6 +424,36 @@ function hasTestExemption(description: string): boolean {
   );
 }
 
+// Add new function for webhook
+async function sendWebhook(data: any): Promise<void> {
+  if (!WEBHOOK_URL) return;
+
+  return new Promise((resolve, reject) => {
+    const url = new URL(WEBHOOK_URL);
+    const options = {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    };
+
+    const req = (url.protocol === 'https:' ? https : http).request(options, (res) => {
+      res.on('end', () => resolve());
+    });
+
+    req.on('error', (error) => {
+      console.error('Webhook Error:', error);
+      reject(error);
+    });
+
+    req.write(JSON.stringify(data));
+    req.end();
+  });
+}
+
 // Modificar o main para incluir mais logs
 async function main() {
   try {
@@ -506,6 +539,23 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
           body: testWarning
         });
         
+        // Enviar webhook se URL estiver configurada
+        if (WEBHOOK_URL) {
+          try {
+            await sendWebhook({
+              repository: `${prDetails.owner}/${prDetails.repo}`,
+              pull_request: prDetails.pull_number,
+              title: prDetails.title,
+              missing_tests: testAnalysis.missingTests,
+              affected_files: testAnalysis.affectedFiles,
+              url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`
+            });
+            console.log('Webhook sent successfully');
+          } catch (error) {
+            console.error('Failed to send webhook:', error);
+          }
+        }
+
         // Se AVALIAR_TEST_PR for true, encerra aqui
         if (AVALIAR_TEST_PR) {
           return;
