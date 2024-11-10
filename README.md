@@ -1,29 +1,27 @@
-# AI Code Reviewer
+# Revisor de Código com IA
 
-AI Code Reviewer is a GitHub Action that leverages AI providers (OpenAI or Gemini) to provide intelligent feedback and suggestions on
-your pull requests. This powerful tool helps improve code quality and saves developers time by automating the code
-review process.
+O Revisor de Código com IA é uma GitHub Action que utiliza provedores de IA (OpenAI ou Gemini) para fornecer feedback inteligente e sugestões sobre suas pull requests. Essa ferramenta ajuda a melhorar a qualidade do código e economiza tempo dos desenvolvedores ao automatizar o processo de revisão de código.
 
-## Features
+## Funcionalidades
 
-- Reviews pull requests using OpenAI's GPT-4 or Google's Gemini API
-- Provides intelligent comments and suggestions for improving your code
-- Automatic test coverage verification
-- Filters out files that match specified exclude patterns
-- Easy to set up and integrate into your GitHub workflow
+- Revisa pull requests usando o modelos da OpenAI ou Gemini do Google
+- Fornece comentários inteligentes e sugestões para melhorar seu código
+- Verificação automática de cobertura de testes
+- Filtra arquivos que correspondem a padrões de exclusão especificados
+- Fácil de configurar e integrar ao seu fluxo de trabalho no GitHub
 
-## Setup
+## Configuração
 
-1. You'll need an API key from either OpenAI or Google (Gemini). Sign up for an API key at:
-   - OpenAI: [OpenAI Platform](https://platform.openai.com/signup)
+1. Você precisará de uma chave de API da OpenAI ou do Google (Gemini). Inscreva-se para obter uma chave de API em:
+   - OpenAI: [Plataforma OpenAI](https://platform.openai.com/signup)
    - Google AI: [Google AI Studio](https://makersuite.google.com/app/apikey)
 
-2. Add your chosen API key as a GitHub Secret in your repository with an appropriate name (e.g., `OPENAI_API_KEY` or `GOOGLE_API_KEY`).
+2. Adicione a chave de API escolhida como um segredo no seu repositório GitHub com um nome apropriado (por exemplo, `OPENAI_API_KEY` ou `GOOGLE_API_KEY`).
 
-3. Create a `.github/workflows/code_review.yml` file in your repository and add the following content:
+3. Crie um arquivo `.github/workflows/code_review.yml` no seu repositório e adicione o seguinte conteúdo:
 
 ```yaml
-name: AI Code Reviewer
+name: Code Review with LLM
 
 on:
   pull_request:
@@ -31,51 +29,90 @@ on:
       - opened
       - synchronize
       - reopened
-permissions: write-all
+  issue_comment:
+    types:
+      - created
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 jobs:
-  review:
+  code_review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repo
+      - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: AI Code Reviewer
-        uses: your-username/ai-code-reviewer@main
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Code Review
+        uses: fanhubteam/ai-codereviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_PROVIDER: "gemini"
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL: "gemini-1.5-pro" # Using Gemini 1.5 Pro
-          exclude: "**/*.json, **/*.md"
-          BOT_NAME: "QuatroDois"
-          BOT_IMAGE_URL: "your-image-url"
+          API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          MODEL: "gemini-pro"
+          exclude: "yarn.lock,dist/**"
+          AVALIAR_TEST_PR: "true"
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
 ```
 
-4. Replace `your-username` with your GitHub username or organization name where the AI Code Reviewer repository is
-   located.
+4. Substitua `fanhubteam` pelo seu nome de usuário ou nome da organização no GitHub onde o repositório do Revisor de Código com IA está localizado.
 
-5. Customize the `exclude` input if you want to ignore certain file patterns from being reviewed.
+5. Personalize a entrada `exclude` se você quiser ignorar certos padrões de arquivos na revisão.
 
-6. Commit the changes to your repository, and AI Code Reviewer will start working on your future pull requests.
+6. Comite as mudanças no seu repositório, e o Revisor de Código com IA começará a funcionar nas suas futuras pull requests.
 
-### Using OpenAI (Default)
+### Notificações via Webhook
 
-### Webhook Notifications
+Você pode configurar uma URL de webhook para receber notificações quando os testes estiverem faltando:
 
-You can configure a webhook URL to receive notifications when tests are missing:
+## Como Funciona
 
-## How It Works
+A GitHub Action do Revisor de Código com IA é acionada em três momentos principais:
 
-The AI Code Reviewer GitHub Action retrieves the pull request diff, filters out excluded files, and sends code chunks to
-the OpenAI API. It then generates review comments based on the AI's response and adds them to the pull request.
+1. **Automaticamente em Pull Requests**:
+   - Quando uma PR é aberta
+   - Quando novos commits são adicionados (synchronize)
+   - Quando uma PR é reaberta
 
-## Contributing
+2. **Manualmente via Comando**:
+   - Quando alguém comenta `/code_review` em uma PR existente
 
-Contributions are welcome! Please feel free to submit issues or pull requests to improve the AI Code Reviewer GitHub
-Action.
+Para cada acionamento, a action executa os seguintes passos:
 
-Let the maintainer generate the final package (`yarn build` & `yarn package`).
+1. **Análise do Código**:
+   - Recupera o diff completo da pull request
+   - Filtra arquivos excluídos baseado nos padrões definidos em `exclude`
+   - Identifica alterações específicas por arquivo
 
-## License
+2. **Verificação de Testes**:
+   - Analisa se existem testes para as alterações realizadas
+   - Verifica padrões comuns de arquivos de teste (.test.js, .spec.ts, etc)
+   - Se `AVALIAR_TEST_PR` estiver ativo, alerta sobre arquivos sem testes
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more information.
+3. **Revisão por IA**:
+   - Envia o código alterado para o provedor de IA configurado (OpenAI ou Gemini)
+   - Processa a resposta da IA para gerar comentários relevantes
+   - Adiciona os comentários diretamente na linha específica do código
+
+4. **Notificações**:
+   - Se configurado, envia notificações via webhook sobre testes faltantes
+   - Adiciona todos os comentários como uma única revisão na PR
+   - Marca problemas encontrados para correção
+
+A action utiliza o contexto completo da PR, incluindo título e descrição, para fornecer revisões mais precisas e contextualizadas. Todos os comentários são feitos em português e focam em sugestões de melhorias, sem incluir elogios ou comentários positivos desnecessários.
+
+## Usando o Comando `/code_review`
+
+Você pode usar o comando `/code_review` em comentários de pull requests para acionar manualmente a revisão de código pela IA. Basta adicionar um comentário na pull request com o texto `/code_review` e a ação será executada.
+
+## Contribuindo
+
+Contribuições são bem-vindas! Sinta-se à vontade para enviar issues ou pull requests para melhorar a GitHub Action do Revisor de Código com IA.
+
+Deixe o mantenedor gerar o pacote final (`yarn build` & `yarn package`).
+
+## Licença
+
+Este projeto é licenciado sob a Licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais informações.
