@@ -361,16 +361,16 @@ function createComment(file, chunk, aiResponses) {
         };
     });
 }
-function createReviewComment(owner, repo, pull_number, comments, event = "COMMENT" // Adicionar opção de evento
+// Modificar a função createReviewComment para aceitar um body opcional
+function createReviewComment(owner, repo, pull_number, comments, event = "COMMENT", // Adiciona opção de evento
+body // Adiciona parâmetro body opcional
 ) {
     return __awaiter(this, void 0, void 0, function* () {
         yield octokit.pulls.createReview(Object.assign({ owner,
             repo,
             pull_number,
             comments,
-            event }, (event === "APPROVE" ? {
-            body: "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos."
-        } : {})));
+            event }, (body ? { body } : {})));
     });
 }
 function needsTests(file) {
@@ -571,8 +571,9 @@ function main() {
                 numberOfMissingTests: testAnalysis.missingTests.length
             });
             let hasIssues = false;
+            const testExemptionDetails = yield getTestExemptionDetails(prDetails.description);
             // Verifica se existem arquivos que precisam de teste
-            if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
+            if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !testExemptionDetails.isExempt) {
                 hasIssues = true;
                 const testWarning = `⚠️ Verificação de Testes
 
@@ -670,8 +671,17 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
             }
             // Adiciona aprovação se não houver problemas
             if (!hasIssues) {
+                let approvalBody;
+                if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && testExemptionDetails.isExempt) {
+                    // Aprovação com exceção
+                    approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado, mas foi identificada uma isenção de testes:\n\n_${testExemptionDetails.reason}_`;
+                }
+                else {
+                    approvalBody = "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos.";
+                }
                 yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, [], // sem comentários específicos
-                "APPROVE" // aprova a PR
+                "APPROVE", // aprova a PR
+                approvalBody // passa a mensagem de aprovação
                 );
             }
         }
