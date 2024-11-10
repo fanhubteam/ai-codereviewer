@@ -193,6 +193,7 @@ interface AIProvider {
     lineNumber: string;
     reviewComment: string;
   }> | null>;
+  processReason(prompt: string): Promise<string>;
 }
 
 class OpenAIProvider implements AIProvider {
@@ -227,6 +228,23 @@ class OpenAIProvider implements AIProvider {
       console.error("OpenAI Error:", error);
       return null;
     }
+  }
+
+  // Adicionar método para processar prompts de razão
+  async processReason(prompt: string): Promise<string> {
+    const completion = await this.openai.chat.completions.create({
+      model: MODEL,
+      temperature: 0.1,
+      messages: [{ role: "system", content: prompt }],
+      response_format: { type: "json_object" }
+    });
+    
+    const content = completion.choices[0].message.content;
+    if (!content) {
+      throw new Error('OpenAI returned empty response');
+    }
+    
+    return content;
   }
 }
 
@@ -291,6 +309,21 @@ Response:`;
       console.error("Gemini Error:", error);
       return null;
     }
+  }
+
+  // Adicionar método para processar prompts de razão
+  async processReason(prompt: string): Promise<string> {
+    const model = this.genAI.getGenerativeModel({ 
+      model: MODEL,
+      generationConfig: {
+        temperature: 0.1,
+        topP: 1,
+        topK: 1,
+      }
+    });
+
+    const result = await model.generateContent(prompt);
+    return result.response.text();
   }
 }
 
@@ -493,6 +526,61 @@ function isCodeReviewCommand(comment: string): boolean {
   return comment.trim().startsWith('/code_review');
 }
 
+// Adicionar função para obter detalhes da isenção
+async function getTestExemptionDetails(description: string): Promise<{ isExempt: boolean; reason: string }> {
+  const exemptionKeywords = [
+    'no tests needed',
+    'test exempt',
+    'skip tests',
+    'sem necessidade de teste',
+    'não requer teste'
+  ];
+  
+  const isExempt = exemptionKeywords.some(keyword => 
+    description.toLowerCase().includes(keyword.toLowerCase())
+  );
+
+  if (!isExempt) {
+    return { isExempt: false, reason: '' };
+  }
+
+  // Usa o LLM para extrair a razão
+  const extractedReason = await extractTestExemptionReason(description, AI_PROVIDER);
+  
+  return { 
+    isExempt: true, 
+    reason: extractedReason || 'Isenção de testes solicitada sem justificativa explícita'
+  };
+}
+
+async function extractTestExemptionReason(description: string, aiProvider: string): Promise<string | null> {
+  const prompt = `Analise o texto abaixo e extraia a justificativa para a não necessidade de testes.
+Se não houver uma justificativa clara, tente inferir do contexto.
+Retorne apenas um JSON com a estrutura: {"reason": "justificativa em português"}
+Se não encontrar nenhuma justificativa possível, retorne {"reason": null}
+
+Texto para análise:
+${description}`;
+
+  try {
+    let provider: AIProvider;
+    if (aiProvider === 'gemini') {
+      provider = new GeminiProvider(API_KEY);
+    } else {
+      provider = new OpenAIProvider(API_KEY);
+    }
+
+    const response = await provider.processReason(prompt);
+    if (!response) return null;
+
+    const parsed = JSON.parse(response);
+    return parsed.reason;
+  } catch (error) {
+    console.error('Error extracting test exemption reason:', error);
+    return null;
+  }
+}
+
 // Modificar o main para incluir verificação de comentários
 async function main() {
   try {
@@ -585,6 +673,8 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
       // Enviar webhook se URL estiver configurada
       if (WEBHOOK_URL) {
         try {
+          const testExemptionDetails = await getTestExemptionDetails(prDetails.description);
+          
           await sendWebhook({
             // Informações do repositório
             repository: {
@@ -616,7 +706,12 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
               affected_files: testAnalysis.affectedFiles,
               has_tests: testAnalysis.hasTests,
               total_files_analyzed: parsedDiff.length,
-              test_exemption: hasTestExemption(prDetails.description),
+              test_exemption: {
+                is_exempt: testExemptionDetails.isExempt,
+                reason: testExemptionDetails.reason,
+                detected_keyword: testExemptionDetails.isExempt ? true : false
+              },
+              needs_tests: testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests
             },
             // Metadados
             metadata: {
@@ -626,7 +721,7 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
               event_type: eventData.comment ? 'comment_command' : 'pr_event'
             }
           });
-          console.log('Webhook sent successfully with extended information');
+          console.log('Webhook sent successfully with test exemption information');
         } catch (error) {
           console.error('Failed to send webhook:', error);
         }
