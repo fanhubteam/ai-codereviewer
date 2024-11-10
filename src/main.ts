@@ -348,7 +348,7 @@ function needsTests(file: File): boolean {
     return false;
   }
 
-  // Lista de extens��es de arquivos que geralmente precisam de testes
+  // Lista de extensões de arquivos que geralmente precisam de testes
   const testableExtensions = [
     '.py',    // Python
     '.js',    // JavaScript
@@ -489,6 +489,7 @@ async function main() {
     console.log('Event type:', eventData.action);
     
     // Verificar se é um comentário em PR com comando /code_review
+    let shouldProcessPR = false;
     if (eventData.comment) {
       if (!eventData.issue?.pull_request) {
         console.log('Comment is not on a pull request, ignoring');
@@ -501,10 +502,14 @@ async function main() {
       }
 
       console.log('Code review command detected');
+      shouldProcessPR = true;
+    } else if (eventData.pull_request && 
+              ["opened", "reopened", "synchronize"].includes(eventData.action)) {
+      shouldProcessPR = true;
     }
-    // Se não for comentário, verifica se é PR
-    else if (!eventData.pull_request) {
-      console.error('Not a pull request event or comment');
+
+    if (!shouldProcessPR) {
+      console.log('No valid trigger for PR processing');
       return;
     }
 
@@ -515,41 +520,27 @@ async function main() {
       pull_number: prDetails.pull_number
     });
 
-    let diff: string | null;
+    let diff: string | null = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
 
-    if (eventData.action === "opened" || eventData.action === "reopened" || eventData.action === "synchronize") {
-      if (eventData.action === "synchronize") {
-        const response = await octokit.repos.compareCommits({
-          headers: { accept: "application/vnd.github.v3.diff" },
-          owner: prDetails.owner,
-          repo: prDetails.repo,
-          base: eventData.before,
-          head: eventData.after,
-        });
-        diff = String(response.data);
-      } else {
-        diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-      }
+    if (!diff) {
+      console.log('No diff found');
+      return;
+    }
 
-      if (!diff) {
-        console.log('No diff found');
-        return;
-      }
+    console.log('Diff found, proceeding with analysis');
+    const parsedDiff = parseDiff(diff);
+    console.log('Number of files in diff:', parsedDiff.length);
 
-      console.log('Diff found, proceeding with analysis');
-      const parsedDiff = parseDiff(diff);
-      console.log('Number of files in diff:', parsedDiff.length);
+    const testAnalysis = await analyzeTests(parsedDiff, prDetails);
+    console.log('Test Analysis Result:', {
+      hasTests: testAnalysis.hasTests,
+      numberOfAffectedFiles: testAnalysis.affectedFiles.length,
+      numberOfMissingTests: testAnalysis.missingTests.length
+    });
 
-      const testAnalysis = await analyzeTests(parsedDiff, prDetails);
-      console.log('Test Analysis Result:', {
-        hasTests: testAnalysis.hasTests,
-        numberOfAffectedFiles: testAnalysis.affectedFiles.length,
-        numberOfMissingTests: testAnalysis.missingTests.length
-      });
-
-      // Verifica se existem arquivos que precisam de teste
-      if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
-        const testWarning = `⚠️ Verificação de Testes
+    // Verifica se existem arquivos que precisam de teste
+    if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && !hasTestExemption(prDetails.description)) {
+      const testWarning = `⚠️ Verificação de Testes
 
 Esta PR contém alterações em arquivos que requerem testes, mas nenhum teste foi encontrado.
 
@@ -567,49 +558,49 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
 - "test exempt"
 - "no tests needed"`;
 
-        await octokit.issues.createComment({
-          owner: prDetails.owner,
-          repo: prDetails.repo,
-          issue_number: prDetails.pull_number,
-          body: testWarning
-        });
-        
-        // Enviar webhook se URL estiver configurada
-        if (WEBHOOK_URL) {
-          try {
-            await sendWebhook({
-              repository: `${prDetails.owner}/${prDetails.repo}`,
-              pull_request: prDetails.pull_number,
-              title: prDetails.title,
-              missing_tests: testAnalysis.missingTests,
-              affected_files: testAnalysis.affectedFiles,
-              url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`
-            });
-            console.log('Webhook sent successfully');
-          } catch (error) {
-            console.error('Failed to send webhook:', error);
-          }
-        }
-
-        // Se AVALIAR_TEST_PR for true, encerra aqui
-        if (AVALIAR_TEST_PR) {
-          return;
+      await octokit.issues.createComment({
+        owner: prDetails.owner,
+        repo: prDetails.repo,
+        issue_number: prDetails.pull_number,
+        body: testWarning
+      });
+      
+      // Enviar webhook se URL estiver configurada
+      if (WEBHOOK_URL) {
+        try {
+          await sendWebhook({
+            repository: `${prDetails.owner}/${prDetails.repo}`,
+            pull_request: prDetails.pull_number,
+            title: prDetails.title,
+            missing_tests: testAnalysis.missingTests,
+            affected_files: testAnalysis.affectedFiles,
+            url: `https://github.com/${prDetails.owner}/${prDetails.repo}/pull/${prDetails.pull_number}`
+          });
+          console.log('Webhook sent successfully');
+        } catch (error) {
+          console.error('Failed to send webhook:', error);
         }
       }
 
-      // Continua com a análise normal do código apenas se AVALIAR_TEST_PR for false
-      if (!AVALIAR_TEST_PR) {
-        const excludePatterns = core.getInput("exclude").split(",").map(s => s.trim());
-        const filteredDiff = parsedDiff.filter(file => 
-          !excludePatterns.some(pattern => minimatch(file.to ?? "", pattern))
-        );
-
-        const comments = await analyzeCode(filteredDiff, prDetails);
-        if (comments.length > 0) {
-          await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-        }
+      // Se AVALIAR_TEST_PR for true, encerra aqui
+      if (AVALIAR_TEST_PR) {
+        return;
       }
     }
+
+    // Continua com a análise normal do código apenas se AVALIAR_TEST_PR for false
+    if (!AVALIAR_TEST_PR) {
+      const excludePatterns = core.getInput("exclude").split(",").map(s => s.trim());
+      const filteredDiff = parsedDiff.filter(file => 
+        !excludePatterns.some(pattern => minimatch(file.to ?? "", pattern))
+      );
+
+      const comments = await analyzeCode(filteredDiff, prDetails);
+      if (comments.length > 0) {
+        await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+      }
+    }
+
   } catch (error) {
     console.error('Main execution error:', error);
     throw error;
