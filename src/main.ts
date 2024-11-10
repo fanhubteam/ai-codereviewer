@@ -241,18 +241,7 @@ class OpenAIProvider implements AIProvider {
     const completion = await this.openai.chat.completions.create({
       model: MODEL,
       temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content: jsonResponse ? 
-            "You are a code review assistant that always responds in valid JSON format." : 
-            "You are a code review assistant."
-        },
-        { 
-          role: "user", 
-          content: prompt 
-        }
-      ],
+      messages: [{ role: "system", content: prompt }],
       // Conditionally include response_format
       ...(jsonResponse && MODEL === "gpt-4-1106-preview"
         ? { response_format: { type: "json_object" } }
@@ -332,7 +321,7 @@ Response:`;
   }
 
   // Adicionar método para processar prompts de razão
-  async processReason(prompt: string, jsonResponse: boolean = false): Promise<string> {
+  async processReason(prompt: string): Promise<string> {
     const model = this.genAI.getGenerativeModel({ 
       model: MODEL,
       generationConfig: {
@@ -342,23 +331,8 @@ Response:`;
       }
     });
 
-    if (jsonResponse) {
-      prompt = `${prompt}\n\nIMPORTANT: You must respond ONLY with a valid JSON object. No additional text.`;
-    }
-
     const result = await model.generateContent(prompt);
-    const response = result.response.text();
-
-    if (jsonResponse) {
-      // Extract JSON from response for Gemini
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No valid JSON found in Gemini response');
-      }
-      return jsonMatch[0];
-    }
-
-    return response;
+    return result.response.text();
   }
 }
 
@@ -562,137 +536,23 @@ function isCodeReviewCommand(comment: string): boolean {
   return comment.trim().startsWith('/code_review');
 }
 
-// Add new interface for LLM response structure
-interface TestExemptionResponse {
-  isValidJustification: boolean;
-  justification: string;
-  analysis: string;
-  recommendation: string;
-}
-
-// Add new utility function to validate JSON structure
-function isValidExemptionResponse(data: any): data is TestExemptionResponse {
-  return typeof data === 'object' && data !== null &&
-         typeof data.isValidJustification === 'boolean' &&
-         typeof data.justification === 'string' &&
-         typeof data.analysis === 'string' &&
-         typeof data.recommendation === 'string';
-}
-
-// Add retry function for LLM calls
-async function retryLLMWithError(
-  provider: AIProvider, 
-  originalPrompt: string, 
-  errorDetails: string,
-  maxRetries: number = 2
-): Promise<string> {
-  const retryPrompt = `Ocorreu um erro ao processar a resposta anterior. Por favor, corrija e gere uma nova resposta.
-
-Erro encontrado: ${errorDetails}
-
-IMPORTANTE:
-1. Você DEVE retornar um objeto JSON válido
-2. O JSON deve seguir EXATAMENTE esta estrutura:
-{
-  "isValidJustification": boolean,
-  "justification": "string",
-  "analysis": "string",
-  "recommendation": "string"
-}
-3. Não inclua nenhum texto adicional antes ou depois do JSON
-4. Certifique-se que todos os campos estejam presentes
-
-Prompt original:
-${originalPrompt}
-
-Response:`;
-
-  return provider.processReason(retryPrompt, true);
-}
-
-// Modify extractTestExemptionReason to include retry logic
+// Modificar a função extractTestExemptionReason para gerar uma mensagem detalhada usando o LLM
 async function extractTestExemptionReason(description: string): Promise<string | null> {
-  const prompt = `Analise o texto abaixo e extraia a justificativa para a isenção de testes.
-Se encontrar uma justificativa, avalie sua validade e formate uma resposta detalhada.
+  const prompt = `Você é um assistente especializado em revisão de código. Abaixo está a descrição de uma pull request onde o autor solicitou isenção de testes. Analise a justificativa fornecida e elabore uma mensagem de aprovação que inclua um resumo da justificativa, destacando como isso afeta a decisão de aprovação.
 
-Texto da PR:
----
+Descrição da PR:
 ${description}
----
 
-Requisitos:
-1. Identifique especificamente o trecho que justifica a isenção de testes
-2. Avalie se a justificativa é válida
-3. Explique por que a justificativa é ou não aceitável
-
-Retorne no seguinte formato JSON (importante: mantenha a estrutura exata):
-{
-  "isValidJustification": true/false,
-  "justification": "texto extraído que justifica a isenção",
-  "analysis": "sua análise da justificativa",
-  "recommendation": "recomendação final"
-}`;
+Responda em português com uma mensagem adequada para incluir na aprovação da PR. Seja claro e conciso.`;
 
   try {
     const provider = getAIProvider();
-    console.log('Requesting test exemption analysis from LLM...');
-    
-    let response = await provider.processReason(prompt, true);
-    console.log('Initial LLM response:', response);
+    const response = await provider.processReason(prompt);
+    if (!response) return null;
 
-    let parsed: TestExemptionResponse | null = null;
-    let retryCount = 0;
-    const maxRetries = 2;
-
-    while (retryCount < maxRetries) {
-      try {
-        const parsedAttempt = JSON.parse(response);
-        
-        if (isValidExemptionResponse(parsedAttempt)) {
-          parsed = parsedAttempt;
-          break;
-        }
-
-        console.log(`Attempt ${retryCount + 1}: Invalid response structure`);
-        response = await retryLLMWithError(
-          provider,
-          prompt,
-          'A resposta não seguiu a estrutura JSON esperada. Todos os campos são obrigatórios.',
-          maxRetries
-        );
-        retryCount++;
-        
-      } catch (e) {
-        console.log(`Attempt ${retryCount + 1}: JSON parse error`);
-        response = await retryLLMWithError(
-          provider,
-          prompt,
-          'A resposta não é um JSON válido. Por favor, corrija a sintaxe.',
-          maxRetries
-        );
-        retryCount++;
-      }
-    }
-
-    if (!parsed) {
-      console.error('Failed to get valid response after retries');
-      return "⚠️ Não foi possível analisar a justificativa após múltiplas tentativas. Por favor, revise e tente novamente.";
-    }
-
-    if (!parsed.isValidJustification) {
-      return "⚠️ Uma justificativa válida para isenção de testes não foi encontrada. Por favor, explique claramente por que os testes não são necessários.";
-    }
-
-    return `📝 **Análise da Justificativa para Isenção de Testes**
-
-> ${parsed.justification}
-
-**Análise**: ${parsed.analysis}
-
-**Recomendação**: ${parsed.recommendation}`;
-
+    return response.trim();  // Retorna a mensagem gerada pelo LLM
   } catch (error) {
-    console.error('Error in extractTestExemptionReason:', error);
+    console.error('Error generating exemption reason message:', error);
     return null;
   }
 }
@@ -888,12 +748,7 @@ Use uma das seguintes palavras-chave na descrição da PR para indicar que não 
 
       if (testAnalysis.affectedFiles.length > 0 && !testAnalysis.hasTests && testExemptionDetails.isExempt) {
         // Aprovação com exceção e mensagem detalhada
-        approvalBody = `✨ **LGTM** - Aprovado com exceção de testes
-
-${testExemptionDetails.reason}
-
----
-*Esta PR foi aprovada com isenção de testes baseada na justificativa acima.*`;
+        approvalBody = `✨ **LGTM** - Aprovado com exceções.\n\nCódigo revisado e aprovado. Observação sobre a isenção de testes:\n\n${testExemptionDetails.reason}`;
       } else {
         approvalBody = "✨ **LGTM** - Looks Good To Me!\n\nCódigo revisado e aprovado. Não foram encontrados problemas significativos.";
       }
